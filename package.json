@@ -1,0 +1,21 @@
+{
+  "name": "lobane-motorcycle",
+  "version": "1.0.0",
+  "description": "Marketplace de motos Lobane Motorcycle",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --no-warnings server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3",
+    "multer": "^2.5.0",
+    "sharp": "^0.35.5"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  }
+}

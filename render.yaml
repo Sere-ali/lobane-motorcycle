@@ -1,0 +1,31 @@
+# Blueprint Render pour Lobane Motorcycle.
+# Render > New > Blueprint > choisir le dépôt GitHub. Render demande SUPER_EMAIL et SUPER_PASSWORD à la création.
+services:
+  - type: web
+    name: lobane-motorcycle
+    runtime: node
+    region: frankfurt            # région la plus proche d'Abidjan (non modifiable après création)
+    plan: 0.5c-512mb             # payant : requis pour le disque persistant (l'offre gratuite efface les données)
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    disk:
+      name: lobane-data
+      mountPath: /var/data       # base SQLite, photos et secret de session
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: NO_DEMO               # pas de boutiques ni de motos de démonstration en production
+        value: "1"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SUPER_EMAIL           # e-mail du super admin (demandé une seule fois à la création)
+        sync: false
+      - key: SUPER_PASSWORD        # mot de passe du super admin (demandé une seule fois à la création)
+        sync: false
