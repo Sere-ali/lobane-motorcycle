@@ -117,6 +117,40 @@
     sel.addEventListener('change', function () { sel.form.submit(); });
   });
 
+
+  // 0l. Mot de passe : bouton « œil » pour afficher / masquer
+  doc.querySelectorAll('input[type="password"]').forEach(function (inp) {
+    var wrap = doc.createElement('span'); wrap.className = 'pwwrap';
+    inp.parentNode.insertBefore(wrap, inp); wrap.appendChild(inp);
+    var b = doc.createElement('button'); b.type = 'button'; b.className = 'pweye'; b.setAttribute('aria-label', 'Afficher le mot de passe'); b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg>';
+    b.addEventListener('click', function () {
+      var show = inp.type === 'password'; inp.type = show ? 'text' : 'password';
+      b.classList.toggle('on', show); b.setAttribute('aria-pressed', show ? 'true' : 'false'); b.setAttribute('aria-label', show ? 'Masquer le mot de passe' : 'Afficher le mot de passe');
+    });
+    wrap.appendChild(b);
+  });
+
+  // 0m. Application installable (PWA) : service worker + bouton « Installer l'app »
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+  }
+  var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone;
+  var nav = doc.querySelector('nav.main, header.site nav');
+  var addInstall = function (onClick) {
+    if (standalone || !nav || doc.getElementById('pwa-install')) return;
+    var b = doc.createElement('button'); b.type = 'button'; b.id = 'pwa-install'; b.className = 'installbtn'; b.textContent = '📲 Installer l\'app'; b.addEventListener('click', onClick); nav.appendChild(b);
+  };
+  var deferred = null;
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault(); deferred = e;
+    addInstall(function () { if (!deferred) return; deferred.prompt(); deferred.userChoice.then(function () { deferred = null; var x = doc.getElementById('pwa-install'); if (x) x.remove(); }); });
+  });
+  window.addEventListener('appinstalled', function () { var x = doc.getElementById('pwa-install'); if (x) x.remove(); });
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !standalone) {
+    addInstall(function () { window.alert('Pour installer l\'application sur iPhone : appuyez sur le bouton Partager (carré avec une flèche) puis sur « Sur l\'écran d\'accueil ».'); });
+  }
+
   // 0h. Léger décalage (parallaxe) des motifs du héros
   var hero = doc.querySelector('.hero');
   if (hero && !reduce) {

@@ -673,3 +673,13 @@ nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: tr
 .dashhero-road { z-index: 0; }
 .dashhero .rider { z-index: 0; }
 .dashhero-text { z-index: 2; }
+
+/* ===== 20. Œil du mot de passe + bouton d'installation de l'application ===== */
+.pwwrap { position: relative; display: block; }
+.pwwrap input { width: 100%; padding-right: 48px !important; }
+.pweye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: transparent; color: var(--mut); border-radius: 8px; cursor: pointer; transition: color .2s, background .2s; }
+.pweye:hover, .pweye:focus-visible { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.pweye .slash { opacity: 0; transition: opacity .2s; } .pweye.on .slash { opacity: 1; } .pweye.on { color: var(--green); }
+.installbtn { background: var(--ink); color: var(--bg); border: 0; border-radius: var(--r-s); padding: 0 16px; min-height: 40px; font: 700 .95rem var(--f-body, inherit); cursor: pointer; animation: pop .5s var(--ease) both; }
+.installbtn:hover { filter: brightness(1.15); }
+@media (max-width: 860px) { .installbtn { width: 100%; margin: 8px 0; } }

@@ -80,7 +80,8 @@ app.use((req, res, next) => {
 app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /admin\nDisallow: /super\nDisallow: /connexion\n'));
 app.use(express.urlencoded({ extended: false, limit: '50kb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '7d', setHeaders: (r, f) => { if (/\.(css|js)$/.test(f)) r.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } })); // css/js : URL versionnée (?v=hash)
+app.use((req, res, next) => { if (req.path === '/sw.js') res.set('Service-Worker-Allowed', '/'); next(); });
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '7d', setHeaders: (r, f) => { if (/(^|[\\/])sw\.js$|manifest\.webmanifest$|offline\.html$/.test(f)) r.setHeader('Cache-Control', 'no-cache'); else if (/\.(css|js)$/.test(f)) r.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } })); // css/js : URL versionnée (?v=hash)
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true, setHeaders: (r) => r.setHeader('Content-Disposition', 'inline') }));
 
 // Miniatures (560 px) générées à la demande puis servies depuis le disque : les listes de motos chargent vite.

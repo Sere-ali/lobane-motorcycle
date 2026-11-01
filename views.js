@@ -38,7 +38,7 @@ function layout({ title, body, user, flash, desc = '', page = '', ride = false, 
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>${esc(title)}</title><meta name="description" content="${esc(desc || 'Lobane Motorcycle : vente de motos et pièces détachées à Abidjan.')}">
-<meta name="theme-color" content="#1f6b12"><link rel="icon" type="image/png" href="/img/logo-badge-96.png">
+<meta name="theme-color" content="#1f6b12"><link rel="icon" type="image/png" href="/img/logo-badge-96.png"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/img/apple-touch-icon.png"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Lobane"><meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@1,800;1,900&family=Barlow:wght@400;500;600;700&display=swap">
 <style>.bgride{position:fixed;left:0;right:0;bottom:0;height:150px;overflow:hidden;z-index:-1;pointer-events:none}.bgride .ride-bike{position:absolute;bottom:14px;left:0;height:130px;width:156px}.bgride img{width:100%;height:100%;object-fit:contain}</style>
