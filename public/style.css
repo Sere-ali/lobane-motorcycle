@@ -507,3 +507,17 @@ body { animation: fadein .5s ease both; }
   .ribbon-track { width: auto; flex-wrap: wrap; }
   .ride-bike { left: 50%; margin-left: -9vw; transform: none; }
 }
+
+/* ---------- 16. Héros : texte seul, la moto roule en arrière-plan ---------- */
+.hero { min-height: min(760px, calc(100svh - 74px)); display: flex; align-items: flex-start; padding-top: clamp(36px, 8vh, 90px); padding-bottom: clamp(170px, 34vw, 330px); }
+.hero .wrap { display: block; }
+.hero-copy { max-width: 760px; }
+.hero h1 { font-size: clamp(2.5rem, 9vw, 5.6rem); }
+.bgride { height: clamp(150px, 31vw, 330px); }
+.bgride .ride-bike { height: calc(100% - 10px); }
+@media (max-width: 560px) {
+  .bgride { height: clamp(150px, 46vw, 240px); }
+  .hero { padding-bottom: clamp(170px, 52vw, 250px); }
+  .hero .cta .btn { flex: 1 1 100%; }
+}
+@media (max-height: 520px) and (orientation: landscape) { .hero { min-height: 0; padding-bottom: 150px; } .bgride { height: 130px; } }

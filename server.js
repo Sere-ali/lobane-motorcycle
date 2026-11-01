@@ -147,7 +147,6 @@ function parseMoto(b) {
 // ================= SITE PUBLIC =================
 app.get('/', (req, res) => {
   const latest = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp ${PUBLIC_MOTOS} AND m.status='disponible' ORDER BY m.id DESC LIMIT 9`).all();
-  const star = db.prepare(`SELECT m.*, u.shop_name ${PUBLIC_MOTOS} AND m.image IS NOT NULL AND m.status='disponible' ORDER BY m.id DESC LIMIT 1`).get();
   const nm = db.prepare(`SELECT COUNT(*) c ${PUBLIC_MOTOS}`).get().c;
   const ns = db.prepare(`SELECT COUNT(*) c FROM users WHERE role='admin' AND active=1`).get().c;
   const counts = Object.fromEntries(db.prepare(`SELECT m.type t, COUNT(*) c ${PUBLIC_MOTOS} GROUP BY m.type`).all().map((r) => [r.t, r.c]));
@@ -164,10 +163,6 @@ app.get('/', (req, res) => {
     <h1>Le meilleur vendeur de <em>motos</em> en Côte d'Ivoire</h1>
     <p class="lead">Comparez les motos de nos boutiques à Abidjan : motos de qualité, pièces premium, équipements et assurances.</p>
     <div class="cta"><a class="btn" href="#offres">Voir les offres <span class="arr">↓</span></a><a class="btn alt" href="tel:+2250505137178">📞 05 05 13 71 78</a></div>
-  </div>
-  <div class="heroart">
-    <a class="heroart-card" href="${star ? '/moto/' + star.id : '/motos'}" aria-label="${star ? esc(star.title) : 'Voir les motos'}">${star ? motoImg(star, true) : '<img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="Honda Winner R 2026" fetchpriority="high">'}</a>
-    ${star ? `<span class="chip new">À la une · ${esc(star.brand || star.type)}</span><span class="chip price">${fcfa(star.price)}</span>` : '<span class="chip new">Nouveauté · Honda Winner R</span>'}
   </div>
 </div>
 </div>
