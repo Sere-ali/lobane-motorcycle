@@ -38,7 +38,6 @@ function layout({ title, body, user, flash, desc = '', page = '' }) {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@1,800;1,900&family=Barlow:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body class="${esc(page)}"><a class="skip" href="#contenu">Aller au contenu</a>${SPRITE}
-<div class="top"><div class="wrap"><span>📍 3 Ampoules, Koumassi – Abidjan</span><span>🕗 Lun – Ven : 08h00 – 17h00</span><a href="tel:+2250505137178">📞 +225 05 05 13 71 78</a></div></div>
 <header class="site"><div class="wrap">
   <a href="/" class="brand" aria-label="Lobane Motorcycle – accueil"><img src="/img/logo-badge-96.png" width="50" height="50" alt=""><span class="brand-t"><b>Lobane</b><i>Motorcycle</i></span></a>
   <button class="navtoggle" type="button" aria-expanded="false" aria-controls="menu" aria-label="Ouvrir le menu"><span></span></button>
@@ -62,7 +61,8 @@ function motoCard(m) {
     <span class="shop">${esc(m.shop_name)}</span>
     <h3><a href="/moto/${m.id}">${esc(m.title)}</a></h3>
     <small>${esc(m.type)}${m.brand ? ' · ' + esc(m.brand) : ''}</small>
-    <div class="row"><span class="price">${fcfa(m.price)}</span><a class="btn sm" href="/moto/${m.id}">Voir <span class="arr">→</span></a></div>
+    <div class="row"><span class="price">${fcfa(m.price)}</span><a class="btn alt sm" href="/moto/${m.id}">Détails</a></div>
+    ${m.status === 'vendu' ? '' : `<a class="btn wa order" href="https://wa.me/${digits(m.whatsapp || m.phone) || '2250505137178'}?text=${encodeURIComponent(`Bonjour, je veux commander la moto « ${m.title} » (${fcfa(m.price)}) vue sur le site Lobane Motorcycle.`)}" target="_blank" rel="noopener">💬 Commander</a>`}
   </div></article>`;
 }
 

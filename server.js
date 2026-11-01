@@ -146,7 +146,7 @@ function parseMoto(b) {
 
 // ================= SITE PUBLIC =================
 app.get('/', (req, res) => {
-  const latest = db.prepare(`SELECT m.*, u.shop_name ${PUBLIC_MOTOS} ORDER BY m.id DESC LIMIT 6`).all();
+  const latest = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp ${PUBLIC_MOTOS} AND m.status='disponible' ORDER BY m.id DESC LIMIT 9`).all();
   const star = db.prepare(`SELECT m.*, u.shop_name ${PUBLIC_MOTOS} AND m.image IS NOT NULL AND m.status='disponible' ORDER BY m.id DESC LIMIT 1`).get();
   const nm = db.prepare(`SELECT COUNT(*) c ${PUBLIC_MOTOS}`).get().c;
   const ns = db.prepare(`SELECT COUNT(*) c FROM users WHERE role='admin' AND active=1`).get().c;
@@ -163,24 +163,25 @@ app.get('/', (req, res) => {
     <span class="tag">Super 2016 Power</span>
     <h1>Le meilleur vendeur de <em>motos</em> en Côte d'Ivoire</h1>
     <p class="lead">Comparez les motos de nos boutiques à Abidjan : motos de qualité, pièces premium, équipements et assurances.</p>
-    <div class="cta"><a class="btn" href="/motos">Voir toutes les motos <span class="arr">→</span></a><a class="btn alt" href="tel:+2250505137178">📞 05 05 13 71 78</a></div>
+    <div class="cta"><a class="btn" href="#offres">Voir les offres <span class="arr">↓</span></a><a class="btn alt" href="tel:+2250505137178">📞 05 05 13 71 78</a></div>
   </div>
   <div class="heroart">
     <a class="heroart-card" href="${star ? '/moto/' + star.id : '/motos'}" aria-label="${star ? esc(star.title) : 'Voir les motos'}">${star ? motoImg(star, true) : '<img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="Honda Winner R 2026" fetchpriority="high">'}</a>
     ${star ? `<span class="chip new">À la une · ${esc(star.brand || star.type)}</span><span class="chip price">${fcfa(star.price)}</span>` : '<span class="chip new">Nouveauté · Honda Winner R</span>'}
   </div>
-</div></div>
+</div>
+  <div class="ride" aria-hidden="true"><div class="ride-bike"><img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="" loading="lazy"></div><div class="ride-road"></div></div></div>
 <div class="stats"><div class="wrap">
   <div><strong data-count="${nm}">${nm}</strong><span>Motos en ligne</span></div>
   <div><strong data-count="${ns}">${ns}</strong><span>Boutiques partenaires</span></div>
   <div><strong data-count="2016">2016</strong><span>Début de l'aventure</span></div>
   <div><strong data-count="458" data-suffix=" K">458 K</strong><span>Abonnés TikTok</span></div></div></div>
 <div class="ribbon" aria-hidden="true"><div class="ribbon-track">${half}${half}</div></div>
+<section id="offres" class="alt-bg"><div class="wrap"><h2 class="reveal">Offres disponibles</h2><p class="sub reveal">Les motos publiées par nos boutiques. Choisissez, puis cliquez sur « Commander » pour finir votre achat par WhatsApp.</p>
+  ${latest.length ? `<div class="grid g3">${latest.map(motoCard).join('')}</div>` : '<div class="empty">Aucune annonce pour le moment. Les nouvelles motos publiées par les boutiques apparaîtront ici.</div>'}
+  <p style="margin-top:28px" class="reveal"><a class="btn" href="/motos">Voir tout le catalogue <span class="arr">→</span></a></p></div></section>
 <section><div class="wrap"><h2 class="reveal">Parcourir par type</h2><p class="sub reveal">Choisissez la catégorie qui vous correspond.</p>
   <div class="grid g3">${TYPES.map((t) => `<a class="card type reveal" href="/motos?type=${encodeURIComponent(t)}">${typeIcon(t)}<span><b>${esc(t)}</b><small>${counts[t] || 0} annonce${(counts[t] || 0) > 1 ? 's' : ''}</small></span></a>`).join('')}</div></div></section>
-<section class="alt-bg"><div class="wrap"><h2 class="reveal">Dernières annonces</h2><p class="sub reveal">Les motos récemment ajoutées par nos boutiques.</p>
-  ${latest.length ? `<div class="grid g3">${latest.map(motoCard).join('')}</div>` : '<div class="empty">Aucune moto en ligne pour le moment.</div>'}
-  <p style="margin-top:28px" class="reveal"><a class="btn" href="/motos">Voir tout le catalogue <span class="arr">→</span></a></p></div></section>
 <section><div class="wrap about">
   <div class="banner reveal left"><img src="/img/logo-banner.jpg" width="1079" height="406" alt="Lobane Motorcycle – vente de moto et pièces détachées" loading="lazy"></div>
   <div class="reveal right"><h2>Pourquoi Lobane ?</h2><ul class="points">
@@ -214,7 +215,7 @@ app.get('/motos', (req, res) => {
   if (max) { where.push('m.price<=?'); args.push(Number(max)); }
   const cond = where.length ? ' AND ' + where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) c ${PUBLIC_MOTOS}${cond}`).get(...args).c;
-  const rows = db.prepare(`SELECT m.*, u.shop_name ${PUBLIC_MOTOS}${cond} ORDER BY m.status='vendu', m.id DESC LIMIT ? OFFSET ?`).all(...args, PER_PAGE, (page - 1) * PER_PAGE);
+  const rows = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp ${PUBLIC_MOTOS}${cond} ORDER BY m.status='vendu', m.id DESC LIMIT ? OFFSET ?`).all(...args, PER_PAGE, (page - 1) * PER_PAGE);
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const qs = (p) => new URLSearchParams({ q, type, shop, min, max, page: p }).toString();
   res.locals.render({

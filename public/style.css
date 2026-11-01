@@ -477,9 +477,31 @@ body { animation: fadein .5s ease both; }
 /* bouton magnétique */
 .magnet { transition: transform .25s var(--ease); will-change: transform; }
 
+/* ---------- 15. Moto qui roule (fond du héros) ---------- */
+.hero { padding-bottom: clamp(110px, 17vw, 190px); }
+.ride { position: absolute; left: 0; right: 0; bottom: 0; z-index: -1; height: clamp(96px, 15vw, 170px); overflow: hidden; pointer-events: none; }
+.ride-bike { position: absolute; bottom: 10px; left: 0; height: calc(100% - 10px); aspect-ratio: 1.2 / 1; animation: ride 9s linear infinite; will-change: transform; }
+.ride-bike img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; filter: brightness(1.07) contrast(1.12); -webkit-mask-image: radial-gradient(ellipse 62% 66% at 50% 62%, #000 60%, transparent 100%); mask-image: radial-gradient(ellipse 62% 66% at 50% 62%, #000 60%, transparent 100%); animation: bounce .45s ease-in-out infinite alternate; transform-origin: 50% 90%; }
+/* traînées de vitesse derrière la moto (elle roule vers la gauche : l'arrière est à droite) */
+.ride-bike::before { content: ""; position: absolute; left: 88%; top: 38%; width: 180%; height: 46%; z-index: -1;
+  background: repeating-linear-gradient(0deg, transparent 0 7px, color-mix(in srgb, var(--green) 55%, transparent) 7px 9px, transparent 9px 18px);
+  -webkit-mask-image: linear-gradient(90deg, #000, transparent); mask-image: linear-gradient(90deg, #000, transparent); opacity: .8; animation: speedlines .5s linear infinite; }
+.ride-road { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; background: var(--ink); }
+.ride-road::after { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 2px; background: repeating-linear-gradient(90deg, #fff 0 30px, transparent 30px 64px); animation: road 1s linear infinite; }
+@keyframes ride { from { transform: translateX(100vw); } to { transform: translateX(-110%); } }
+@keyframes bounce { from { transform: translateY(0) rotate(-.3deg); } to { transform: translateY(-3px) rotate(.5deg); } }
+@keyframes speedlines { to { transform: translateX(26px); } }
+@keyframes road { to { background-position: 64px 0; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ride-bike img { mix-blend-mode: normal; border-radius: 18px; } }
+:root[data-theme="dark"] .ride-bike img { mix-blend-mode: normal; border-radius: 18px; }
+
+/* bouton Commander sur les cartes */
+.order { width: 100%; margin-top: 12px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
   .js .reveal { opacity: 1; transform: none; }
   .hero h1 .w, .js .imgbox img.fade, .js .heroart-card img.fade { opacity: 1 !important; transform: none !important; }
   .ribbon-track { width: auto; flex-wrap: wrap; }
+  .ride-bike { left: 50%; margin-left: -9vw; transform: none; }
 }
