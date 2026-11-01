@@ -709,7 +709,8 @@ app.get('/super/compte/nouveau', requireAuth, requireSuper, (req, res) => {
 app.post('/super/boutique', requireAuth, requireSuper, (req, res) => {
   const b = req.body; const email = String(b.email || '').trim().toLowerCase(); const shop = String(b.shop_name || '').trim().slice(0, 80);
   const role = b.role === 'super' ? 'super' : 'admin';
-  if (!shop || !EMAIL_RE.test(email) || String(b.password || '').length < 8) { flash(res, 'err', 'Vérifiez le nom, l\'e-mail et le mot de passe (8 caractères minimum).'); return res.redirect('/super/compte/nouveau'); }
+  const bad = !shop ? 'Le nom de la boutique est vide.' : !EMAIL_RE.test(email) ? `L'e-mail « ${email || 'vide'} » n'est pas valide : il doit ressembler à nom@exemple.com (avec un point après le @).` : String(b.password || '').length < 8 ? `Le mot de passe est trop court (${String(b.password || '').length} caractère(s)) : 8 minimum.` : '';
+  if (bad) { flash(res, 'err', bad); return res.redirect('/super/compte/nouveau'); }
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail.'); return res.redirect('/super/compte/nouveau'); }
   db.prepare('INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp) VALUES (?,?,?,?,?,?)').run(email, bcrypt.hashSync(String(b.password), 10), role, shop, String(b.phone || '').slice(0, 30), String(b.whatsapp || b.phone || '').slice(0, 30));
   flash(res, 'ok', role === 'super' ? `Super administrateur « ${shop} » créé.` : `Boutique « ${shop} » créée : son gérant peut se connecter et publier.`); res.redirect('/super');
