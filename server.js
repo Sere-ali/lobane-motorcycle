@@ -7,9 +7,9 @@ const compression = require('compression');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent } = require('./db');
+const { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent, syncImages } = require('./db');
 const V = require('./views');
-const { esc, fcfa, digits, layout, motoCard, filterForm, motoForm, motoImg, typeIcon } = V;
+const { esc, fcfa, digits, km, etatBadge, shopLine, layout, motoCard, filterForm, motoForm, motoImg, typeIcon } = V;
 
 const PROD = process.env.NODE_ENV === 'production';
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -98,7 +98,9 @@ app.use((req, res, next) => {
   req.user = u && pwStamp(u.password_hash) === tok.stamp ? u : null;
   const f = req.cookies.flash;
   if (f) { try { res.locals.flash = JSON.parse(Buffer.from(f, 'base64').toString()); } catch {} res.clearCookie('flash'); }
-  res.locals.render = (opts) => res.set('Cache-Control', 'no-cache').send(layout({ user: req.user, flash: res.locals.flash, ride: !/^\/(admin|super|connexion)/.test(req.path), ...opts }));
+  const nc = req.user ? newCounts(req.user) : null;
+  res.locals.badge = nc ? nc.orders + nc.inquiries : 0;
+  res.locals.render = (opts) => res.set('Cache-Control', 'no-cache').send(layout({ user: req.user, flash: res.locals.flash, badge: res.locals.badge, ride: !/^\/(admin|super|connexion)/.test(req.path), ...opts }));
   next();
 });
 const flash = (res, type, msg) => res.cookie('flash', Buffer.from(JSON.stringify({ type, msg })).toString('base64'), { httpOnly: true, sameSite: 'lax', maxAge: 15000 });
@@ -108,45 +110,82 @@ const requireSuper = (req, res, next) => (req.user && req.user.role === 'super' 
 
 // ---- envoi de fichiers ----
 const EXT = { 'image/jpeg': 1, 'image/png': 1, 'image/webp': 1 };
+const MAX_PHOTOS = 5;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 5 * 1024 * 1024, files: MAX_PHOTOS + 1 },
   fileFilter: (req, file, cb) => cb(null, !!EXT[file.mimetype]),
 });
+const uploadFields = upload.fields([{ name: 'images', maxCount: MAX_PHOTOS }, { name: 'logo', maxCount: 1 }]);
 const rmFile = (name) => { if (name && /^[a-f0-9]+\.(jpg|png|webp)$/.test(name)) fs.rm(path.join(UPLOAD_DIR, name), { force: true }, () => {}); };
 // Redimensionne et convertit en WebP (photos légères pour les téléphones). Sharp refuse aussi tout fichier qui n'est pas une vraie image.
-const handleUpload = (req, res, next) => upload.single('image')(req, res, async (err) => {
+async function toWebp(buffer, size = 1400) {
+  const name = crypto.randomBytes(12).toString('hex') + '.webp';
+  await sharp(buffer, { limitInputPixels: 50e6 }).rotate()
+    .resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 80 }).toFile(path.join(UPLOAD_DIR, name));
+  return name;
+}
+// Après cet intergiciel : req.saved = { images: [noms], logo: nom|null } (fichiers déjà enregistrés et optimisés)
+const handleUpload = (req, res, next) => uploadFields(req, res, async (err) => {
   const back = req.get('referer') || '/';
-  if (err) { flash(res, 'err', err.code === 'LIMIT_FILE_SIZE' ? 'Photo trop lourde (5 Mo maximum).' : 'Erreur lors de l\'envoi de la photo.'); return res.redirect(back); }
-  if (req.file) {
-    const name = crypto.randomBytes(12).toString('hex') + '.webp';
-    try {
-      await sharp(req.file.buffer, { limitInputPixels: 50e6 }).rotate()
-        .resize({ width: 1400, height: 1400, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 80 }).toFile(path.join(UPLOAD_DIR, name));
-      req.file.filename = name; req.file.buffer = null;
-    } catch (e) { req.file = null; flash(res, 'err', 'Fichier image invalide.'); return res.redirect(back); }
+  req.saved = { images: [], logo: null };
+  if (err) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Photo trop lourde (5 Mo maximum par photo).'
+      : (err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT') ? `Maximum ${MAX_PHOTOS} photos par annonce.` : 'Erreur lors de l\'envoi des photos.';
+    flash(res, 'err', msg); return res.redirect(back);
+  }
+  const f = req.files || {};
+  try {
+    for (const file of f.images || []) req.saved.images.push(await toWebp(file.buffer));
+    if (f.logo && f.logo[0]) req.saved.logo = await toWebp(f.logo[0].buffer, 480);
+  } catch (e) {
+    discardSaved(req.saved); flash(res, 'err', 'Une des photos n\'est pas une image valide.'); return res.redirect(back);
   }
   next();
 });
+const discardSaved = (saved) => { [...(saved?.images || []), saved?.logo].forEach(rmFile); };
+
+// galerie d'une moto : photos classées, la première sert de couverture
+const photosOf = (motoId) => db.prepare('SELECT id, filename FROM moto_images WHERE moto_id=? ORDER BY position, id').all(motoId);
+function writePhotos(motoId, list) { // list = noms de fichiers dans l'ordre voulu
+  db.prepare('DELETE FROM moto_images WHERE moto_id=?').run(motoId);
+  const ins = db.prepare('INSERT INTO moto_images (moto_id, filename, position) VALUES (?,?,?)');
+  list.forEach((n, i) => ins.run(motoId, n, i));
+  db.prepare('UPDATE motos SET image=? WHERE id=?').run(list[0] || null, motoId);
+}
+const removeMotoFiles = (motoId) => photosOf(motoId).forEach((p) => rmFile(p.filename));
 
 // ---- helpers de données ----
 const PER_PAGE = 12;
 const PUBLIC_MOTOS = `FROM motos m JOIN users u ON u.id=m.user_id WHERE u.active=1`;
 const shopsList = () => db.prepare(`SELECT id, shop_name FROM users WHERE active=1 AND (role='admin' OR EXISTS(SELECT 1 FROM motos WHERE user_id=users.id)) ORDER BY shop_name`).all();
 
+const isOn = (v) => v === '1' || v === 'on' || v === 'true';
 function parseMoto(b) {
   const title = String(b.title || '').trim().slice(0, 120);
   const type = TYPES.includes(b.type) ? b.type : null;
   const price = Math.round(Number(b.price));
   const status = b.status === 'vendu' ? 'vendu' : 'disponible';
   if (!title || !type || !Number.isFinite(price) || price < 0 || price > 1e9) return null;
-  return { title, type, price, status, brand: String(b.brand || '').trim().slice(0, 60), description: String(b.description || '').trim().slice(0, 2000) };
+  const thisYear = new Date().getFullYear();
+  const y = Math.round(Number(b.year)); const k = Math.round(Number(b.mileage));
+  return {
+    title, type, price, status,
+    brand: String(b.brand || '').trim().slice(0, 60),
+    description: String(b.description || '').trim().slice(0, 2000),
+    etat: b.etat === 'occasion' ? 'occasion' : 'neuf',
+    year: String(b.year || '').trim() !== '' && Number.isFinite(y) && y >= 1980 && y <= thisYear + 1 ? y : null,
+    mileage: String(b.mileage || '').trim() !== '' && Number.isFinite(k) && k >= 0 && k <= 1e6 ? k : null,
+    color: String(b.color || '').trim().slice(0, 40) || null,
+    negotiable: isOn(b.negotiable) ? 1 : 0,
+    featured: isOn(b.featured) ? 1 : 0,
+  };
 }
 
 // ================= SITE PUBLIC =================
 app.get('/', (req, res) => {
-  const latest = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp ${PUBLIC_MOTOS} AND m.status='disponible' ORDER BY m.id DESC LIMIT 9`).all();
+  const latest = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp, u.logo ${PUBLIC_MOTOS} AND m.status='disponible' ORDER BY m.featured DESC, m.id DESC LIMIT 9`).all();
   const nm = db.prepare(`SELECT COUNT(*) c ${PUBLIC_MOTOS}`).get().c;
   const ns = db.prepare(`SELECT COUNT(*) c FROM users WHERE role='admin' AND active=1`).get().c;
   const counts = Object.fromEntries(db.prepare(`SELECT m.type t, COUNT(*) c ${PUBLIC_MOTOS} GROUP BY m.type`).all().map((r) => [r.t, r.c]));
@@ -201,8 +240,10 @@ app.get('/motos', (req, res) => {
   const shop = /^\d+$/.test(req.query.shop || '') ? req.query.shop : '';
   const min = /^\d+$/.test(req.query.min || '') ? req.query.min : '';
   const max = /^\d+$/.test(req.query.max || '') ? req.query.max : '';
+  const etat = ['neuf', 'occasion'].includes(req.query.etat) ? req.query.etat : '';
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const where = []; const args = [];
+  if (etat) { where.push('m.etat=?'); args.push(etat); }
   if (q) { where.push('(m.title LIKE ? OR m.brand LIKE ? OR m.description LIKE ?)'); const l = `%${q.replace(/[%_]/g, '')}%`; args.push(l, l, l); }
   if (type) { where.push('m.type=?'); args.push(type); }
   if (shop) { where.push('m.user_id=?'); args.push(Number(shop)); }
@@ -210,39 +251,86 @@ app.get('/motos', (req, res) => {
   if (max) { where.push('m.price<=?'); args.push(Number(max)); }
   const cond = where.length ? ' AND ' + where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) c ${PUBLIC_MOTOS}${cond}`).get(...args).c;
-  const rows = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp ${PUBLIC_MOTOS}${cond} ORDER BY m.status='vendu', m.id DESC LIMIT ? OFFSET ?`).all(...args, PER_PAGE, (page - 1) * PER_PAGE);
+  const rows = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp, u.logo ${PUBLIC_MOTOS}${cond} ORDER BY m.status='vendu', m.featured DESC, m.id DESC LIMIT ? OFFSET ?`).all(...args, PER_PAGE, (page - 1) * PER_PAGE);
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
-  const qs = (p) => new URLSearchParams({ q, type, shop, min, max, page: p }).toString();
+  const qs = (p) => new URLSearchParams({ q, type, shop, min, max, etat, page: p }).toString();
   res.locals.render({
     title: 'Toutes les motos – Lobane Motorcycle',
     body: `<section><div class="wrap"><h2>Nos motos</h2><p class="sub">${total} annonce${total > 1 ? 's' : ''} trouvée${total > 1 ? 's' : ''}.</p>
-    ${filterForm({ q, type, shop, min, max }, shopsList())}
+    ${filterForm({ q, type, shop, min, max, etat }, shopsList())}
     ${rows.length ? `<div class="grid g3">${rows.map(motoCard).join('')}</div>` : '<div class="empty">Aucune moto ne correspond à votre recherche.</div>'}
     ${pages > 1 ? `<p class="pager">${page > 1 ? `<a class="btn alt sm" href="/motos?${qs(page - 1)}">← Précédent</a>` : ''}<span>Page ${page} / ${pages}</span>${page < pages ? `<a class="btn alt sm" href="/motos?${qs(page + 1)}">Suivant →</a>` : ''}</p>` : ''}
     </div></section>`,
   });
 });
 
+const notFoundMoto = (req, res) => res.status(404).send(layout({ title: 'Introuvable', user: req.user, body: '<section><div class="wrap"><h2>Annonce introuvable</h2><p class="sub">Cette moto n\'existe plus ou n\'est plus en ligne.</p><a class="btn" href="/motos">Voir les motos</a></div></section>' }));
+const publicMoto = (id) => db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp, u.logo ${PUBLIC_MOTOS} AND m.id=?`).get(id);
+
 app.get('/moto/:id(\\d+)', (req, res) => {
-  const m = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp ${PUBLIC_MOTOS} AND m.id=?`).get(req.params.id);
-  if (!m) return res.status(404).send(layout({ title: 'Introuvable', user: req.user, body: '<section><div class="wrap"><h2>Annonce introuvable</h2><p class="sub">Cette moto n\'existe plus ou n\'est plus en ligne.</p><a class="btn" href="/motos">Voir les motos</a></div></section>' }));
+  const m = publicMoto(req.params.id);
+  if (!m) return notFoundMoto(req, res);
+  const photos = photosOf(m.id);
   const tel = m.phone || '+2250505137178'; const wa = digits(m.whatsapp || m.phone) || '2250505137178';
   const msg = encodeURIComponent(`Bonjour, je suis intéressé(e) par la moto « ${m.title} » (${fcfa(m.price)}) vue sur le site Lobane Motorcycle.`);
+  const spec = (k, v) => (v ? `<li><span>${k}</span><b>${v}</b></li>` : '');
   res.locals.render({
     title: `${m.title} – ${m.shop_name} – Lobane Motorcycle`,
     desc: `${m.title} à ${fcfa(m.price)} chez ${m.shop_name}, Abidjan.`,
     body: `<section><div class="wrap">
     <p class="crumbs"><a href="/">Accueil</a><span>›</span><a href="/motos">Motos</a><span>›</span><a href="/motos?type=${encodeURIComponent(m.type)}">${esc(m.type)}</a></p>
-    <div class="detail"><div class="imgbox">${motoImg(m)}${m.status === 'vendu' ? '<span class="soldtag">Vendu</span>' : ''}</div>
-    <div><span class="tag">${esc(m.type)}</span><h1>${esc(m.title)}</h1><span class="price">${fcfa(m.price)}</span>
-      <ul class="meta"><li>🏪 Boutique : <b>${esc(m.shop_name)}</b></li>${m.brand ? `<li>🏷️ Marque : <b>${esc(m.brand)}</b></li>` : ''}<li>📌 Statut : <b>${m.status === 'vendu' ? 'Vendu' : 'Disponible'}</b></li></ul>
+    <div class="detail"><div class="gallery"><div class="imgbox">${motoImg(m, true)}${m.status === 'vendu' ? '<span class="soldtag">Vendu</span>' : ''}<span class="badges">${m.featured ? '<span class="bdg star">★ À la une</span>' : ''}${etatBadge(m)}</span></div>
+      ${photos.length > 1 ? `<div class="thumbs">${photos.map((p, i) => `<button type="button" class="thumb-btn${i === 0 ? ' on' : ''}" data-src="/uploads/${esc(p.filename)}" aria-label="Voir la photo ${i + 1}"><img src="/uploads/${esc(p.filename)}" alt="" width="84" height="64" loading="lazy"></button>`).join('')}</div>` : ''}</div>
+    <div><span class="tag">${esc(m.type)}</span><h1>${esc(m.title)}</h1><span class="price">${fcfa(m.price)}${m.negotiable ? '<em class="nego">négociable</em>' : ''}</span>
+      <ul class="specs">${spec('Boutique', (m.logo ? `<img class="shoplogo" src="/uploads/${esc(m.logo)}" alt="" width="22" height="22"> ` : '') + esc(m.shop_name))}${spec('Marque', esc(m.brand))}${spec('État', m.etat === 'occasion' ? 'Occasion' : 'Neuf')}${spec('Année', m.year ? esc(m.year) : '')}${spec('Kilométrage', m.mileage != null ? km(m.mileage) : '')}${spec('Couleur', esc(m.color))}${spec('Statut', m.status === 'vendu' ? 'Vendu' : 'Disponible')}</ul>
       ${m.description ? `<p>${esc(m.description).replace(/\n/g, '<br>')}</p>` : ''}
-      <div class="box contactbox"><b>Intéressé(e) ? Contactez ${esc(m.shop_name)}</b>
-        <div class="cta"><a class="btn" href="tel:${esc(tel)}">📞 Appeler</a><a class="btn wa" href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener">💬 WhatsApp</a></div></div>
+      ${m.status === 'vendu' ? '<div class="box"><b>Cette moto est vendue.</b> <a href="/motos">Voir les autres motos</a></div>' : `<div class="box contactbox"><b>Commander cette moto</b>
+        <div class="cta"><a class="btn wa" href="/moto/${m.id}/commander">🛒 Commander</a><a class="btn alt" href="tel:${esc(tel)}">📞 Appeler</a><a class="btn alt" href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener">💬 Poser une question</a></div></div>`}
       <form class="stack panel" style="margin-top:18px" method="post" action="/moto/${m.id}/demande"><b>Ou laissez votre numéro, on vous rappelle</b>
         <label>Votre nom<input name="name" required maxlength="80"></label><label>Téléphone<input name="phone" required maxlength="30" inputmode="tel"></label>
         <label>Message (facultatif)<textarea name="message" rows="3" maxlength="1000"></textarea></label><button class="btn red" type="submit">Envoyer</button></form>
     </div></div></div></section>`,
+  });
+});
+
+// ---- commande : enregistrée dans le back-office, puis confirmation par WhatsApp ----
+app.get('/moto/:id(\\d+)/commander', (req, res) => {
+  const m = publicMoto(req.params.id);
+  if (!m) return notFoundMoto(req, res);
+  if (m.status === 'vendu') return res.locals.render({ title: 'Moto vendue', body: `<section><div class="wrap narrow"><h2>Moto déjà vendue</h2><p class="sub">« ${esc(m.title)} » n'est plus disponible.</p><a class="btn" href="/motos">Voir les autres motos</a></div></section>` });
+  res.locals.render({
+    title: `Commander ${m.title} – Lobane Motorcycle`,
+    body: `<section><div class="wrap" style="max-width:720px"><p class="crumbs"><a href="/">Accueil</a><span>›</span><a href="/moto/${m.id}">${esc(m.title)}</a><span>›</span>Commander</p>
+    <h2>Commander</h2>
+    <div class="ordersum"><div class="thumbbox">${motoImg(m)}</div><div><b>${esc(m.title)}</b><br><span class="price">${fcfa(m.price)}${m.negotiable ? '<em class="nego">négociable</em>' : ''}</span><br><small>${shopLine(m)}</small></div></div>
+    <form class="stack panel" method="post" action="/moto/${m.id}/commander">
+      <label>Votre nom<input name="name" required maxlength="80" autocomplete="name"></label>
+      <label>Téléphone (WhatsApp de préférence)<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel"></label>
+      <label>Quartier / commune de livraison <span class="hint">(facultatif)</span><input name="place" maxlength="120" placeholder="Ex. Koumassi, 3 Ampoules"></label>
+      <label>Message <span class="hint">(facultatif)</span><textarea name="message" rows="3" maxlength="600" placeholder="Une précision, un horaire pour vous rappeler…"></textarea></label>
+      <button class="btn wa" type="submit">✅ Envoyer ma commande</button>
+      <p class="hint">Aucun paiement en ligne. La boutique vous rappelle pour confirmer et convenir de la livraison ou du retrait.</p>
+    </form></div></section>`,
+  });
+});
+app.post('/moto/:id(\\d+)/commander', (req, res) => {
+  const m = publicMoto(req.params.id);
+  if (!m || m.status === 'vendu') return res.redirect(m ? `/moto/${m.id}` : '/motos');
+  const back = `/moto/${m.id}/commander`;
+  if (limited(`ord:${req.ip}`, 5, 10 * 60e3)) { flash(res, 'err', 'Trop de commandes en peu de temps. Réessayez dans quelques minutes.'); return res.redirect(back); }
+  const name = String(req.body.name || '').trim().slice(0, 80); const phone = String(req.body.phone || '').trim().slice(0, 30);
+  if (!name || digits(phone).length < 8) { flash(res, 'err', 'Indiquez votre nom et un numéro de téléphone valide.'); return res.redirect(back); }
+  const place = String(req.body.place || '').trim().slice(0, 120); const message = String(req.body.message || '').trim().slice(0, 600);
+  const r = db.prepare('INSERT INTO orders (shop_id, moto_id, moto_title, price, name, phone, place, message) VALUES (?,?,?,?,?,?,?,?)').run(m.user_id, m.id, m.title, m.price, name, phone, place, message);
+  const num = Number(r.lastInsertRowid);
+  const wa = digits(m.whatsapp || m.phone) || '2250505137178';
+  const txt = encodeURIComponent(`Bonjour, je viens de passer la commande n°${num} sur le site Lobane Motorcycle : ${m.title} (${fcfa(m.price)}).\nNom : ${name}\nTéléphone : ${phone}${place ? '\nLivraison : ' + place : ''}`);
+  res.locals.render({
+    title: `Commande n°${num} enregistrée – Lobane Motorcycle`,
+    body: `<section><div class="wrap narrow" style="max-width:640px;text-align:center"><div class="okmark" aria-hidden="true">✓</div><h2 style="display:inline-block">Commande enregistrée</h2>
+    <p class="sub" style="margin-inline:auto">Merci ${esc(name)} ! Votre commande n°${num} pour <b>${esc(m.title)}</b> (${fcfa(m.price)}) a été transmise à <b>${esc(m.shop_name)}</b>. La boutique vous rappelle très vite.</p>
+    <p>Pour aller plus vite, prévenez la boutique sur WhatsApp :</p>
+    <div class="cta" style="justify-content:center;margin-top:14px"><a class="btn wa" href="https://wa.me/${wa}?text=${txt}" target="_blank" rel="noopener">💬 Envoyer sur WhatsApp</a><a class="btn alt" href="/motos">Voir d'autres motos</a></div></div></section>`,
   });
 });
 
@@ -283,31 +371,93 @@ app.post('/deconnexion', (req, res) => { res.clearCookie('sid'); res.redirect('/
 
 // ================= ESPACE BOUTIQUE =================
 const statusPill = (s) => `<span class="pill ${s === 'vendu' ? 'sold' : 'on'}">${s === 'vendu' ? 'Vendu' : 'Disponible'}</span>`;
+const ORDER_STATUS = { nouvelle: 'Nouvelle', confirmee: 'Confirmée', livree: 'Livrée', annulee: 'Annulée' };
+const orderPill = (s) => `<span class="pill ${s === 'nouvelle' ? 'new' : s === 'annulee' ? 'off' : 'on'}">${ORDER_STATUS[s] || esc(s)}</span>`;
+const likeq = (q) => `%${q.replace(/[%_\\]/g, '')}%`;
+const searchQ = (req) => String(req.query.q || '').trim().slice(0, 60);
+const homeOf = (u) => (u.role === 'super' ? '/super' : '/admin');
+
+// nouveautés à traiter (commandes nouvelles + demandes non traitées) : pastille du menu et indicateurs
+function newCounts(user) {
+  const sh = user.role === 'super' ? '' : ' AND shop_id=?'; const a = user.role === 'super' ? [] : [user.id];
+  return {
+    orders: db.prepare(`SELECT COUNT(*) c FROM orders WHERE status='nouvelle'${sh}`).get(...a).c,
+    inquiries: db.prepare(`SELECT COUNT(*) c FROM inquiries WHERE handled=0${sh}`).get(...a).c,
+  };
+}
+function loadOrders(user, q) {
+  const where = []; const args = [];
+  if (user.role !== 'super') { where.push('o.shop_id=?'); args.push(user.id); }
+  if (q) { where.push('(o.name LIKE ? OR o.phone LIKE ? OR o.moto_title LIKE ? OR o.place LIKE ?)'); const l = likeq(q); args.push(l, l, l, l); }
+  return db.prepare(`SELECT o.*, u.shop_name FROM orders o LEFT JOIN users u ON u.id=o.shop_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY (o.status='nouvelle') DESC, o.id DESC LIMIT 60`).all(...args);
+}
+function loadInquiries(user, q) {
+  const where = []; const args = [];
+  if (user.role !== 'super') { where.push('i.shop_id=?'); args.push(user.id); }
+  if (q) { where.push('(i.name LIKE ? OR i.phone LIKE ? OR i.message LIKE ? OR i.subject LIKE ? OR m.title LIKE ?)'); const l = likeq(q); args.push(l, l, l, l, l); }
+  return db.prepare(`SELECT i.*, m.title, u.shop_name FROM inquiries i LEFT JOIN motos m ON m.id=i.moto_id LEFT JOIN users u ON u.id=i.shop_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY i.handled, i.id DESC LIMIT 60`).all(...args);
+}
+const searchBar = (action, q) => `<form class="searchbar" method="get" action="${action}"><input type="search" name="q" value="${esc(q)}" placeholder="Rechercher un client, un numéro, une moto…" maxlength="60" aria-label="Rechercher"><button class="btn alt sm" type="submit">Rechercher</button>${q ? `<a class="btn sm" href="${action}">Effacer</a>` : ''}</form>`;
+
+function ordersTable(rows, showShop) {
+  if (!rows.length) return '<div class="empty" style="margin-bottom:28px">Aucune commande pour le moment. Dès qu\'un client commande, elle apparaît ici.</div>';
+  return `<div class="tablewrap"><table><tr><th>Date</th><th>Client</th><th>Moto</th>${showShop ? '<th>Boutique</th>' : ''}<th>Livraison</th><th>Statut</th><th>Changer</th></tr>${rows.map((o) => `<tr class="${o.status === 'nouvelle' ? 'rownew' : ''}"><td>${esc(o.created_at.slice(0, 16))}</td><td><b>${esc(o.name)}</b><br><a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></td>
+  <td>${o.moto_id ? `<a href="/moto/${o.moto_id}">${esc(o.moto_title)}</a>` : esc(o.moto_title)}<br><small>${fcfa(o.price)}</small></td>${showShop ? `<td>${esc(o.shop_name || '—')}</td>` : ''}<td>${esc(o.place || '—')}${o.message ? `<br><small>${esc(o.message)}</small>` : ''}</td><td>${orderPill(o.status)}</td>
+  <td><form method="post" action="/admin/commande/${o.id}/statut" class="inl"><select name="status" data-autosubmit aria-label="Changer le statut">${Object.entries(ORDER_STATUS).map(([k, l]) => `<option value="${k}" ${k === o.status ? 'selected' : ''}>${l}</option>`).join('')}</select><noscript><button class="btn alt sm">OK</button></noscript></form></td></tr>`).join('')}</table></div>`;
+}
+function inquiriesTable(rows, showShop) {
+  if (!rows.length) return '<div class="empty" style="margin-bottom:28px">Aucune demande pour le moment.</div>';
+  return `<div class="tablewrap"><table><tr><th>Date</th><th>Nom</th><th>Téléphone</th>${showShop ? '<th>Boutique</th>' : ''}<th>Moto / sujet</th><th>Message</th><th>Suivi</th></tr>${rows.map((i) => `<tr class="${i.handled ? '' : 'rownew'}"><td>${esc(i.created_at.slice(0, 16))}</td><td>${esc(i.name)}</td><td><a href="tel:${esc(i.phone)}">${esc(i.phone)}</a></td>${showShop ? `<td>${esc(i.shop_name || '—')}</td>` : ''}<td>${esc(i.title || i.subject || '—')}</td><td>${esc(i.message || '')}</td>
+  <td><form method="post" action="/admin/demande/${i.id}/traitee" class="inl"><button class="btn ${i.handled ? 'alt' : ''} sm">${i.handled ? '✓ Traitée · rouvrir' : 'Marquer traitée'}</button></form></td></tr>`).join('')}</table></div>`;
+}
+const motoRows = (motos, { showShop = false } = {}) => motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a>${m.featured ? ' <span class="pill new">★ à la une</span>' : ''}</td>${showShop ? `<td>${esc(m.shop_name)}${m.active ? '' : ' <span class="pill off">suspendue</span>'}</td>` : ''}<td>${esc(m.type)}<br><small>${m.etat === 'occasion' ? 'Occasion' : 'Neuf'}${m.year ? ' · ' + esc(m.year) : ''}</small></td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
+  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('');
 
 app.get('/admin', requireAuth, (req, res) => {
   if (req.user.role === 'super') return res.redirect('/super');
+  const q = searchQ(req); const c = newCounts(req.user);
   const motos = db.prepare('SELECT * FROM motos WHERE user_id=? ORDER BY id DESC').all(req.user.id);
-  const inq = db.prepare('SELECT i.*, m.title FROM inquiries i LEFT JOIN motos m ON m.id=i.moto_id WHERE i.shop_id=? ORDER BY i.id DESC LIMIT 20').all(req.user.id);
+  const kpi = (n, l) => `<div class="kpi reveal"><strong data-count="${n}">${n}</strong><span>${l}</span></div>`;
   res.locals.render({ title: 'Mon espace boutique', body: `<section><div class="wrap">
-  <div class="dash-head"><div><span class="tag">Espace gérant</span><h2 style="margin-top:12px">${esc(req.user.shop_name)}</h2><p class="sub" style="margin:10px 0 0">C'est vous qui publiez les annonces de votre boutique. Elles apparaissent sur le site avec le nom de votre boutique.</p></div><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Publier une annonce</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
-  <div class="kpis"><div class="kpi reveal"><strong data-count="${motos.length}">${motos.length}</strong><span>Annonces publiées</span></div><div class="kpi reveal"><strong data-count="${motos.filter((m) => m.status === 'disponible').length}">${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi reveal"><strong data-count="${motos.filter((m) => m.status === 'vendu').length}">${motos.filter((m) => m.status === 'vendu').length}</strong><span>Vendues</span></div><div class="kpi reveal"><strong data-count="${inq.length}">${inq.length}</strong><span>Demandes reçues</span></div></div>
-  <h3 class="sec">Mes motos</h3>
-  ${motos.length ? `<div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a></td><td>${esc(m.type)}</td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
-  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('')}</table></div>` : '<div class="empty" style="margin-bottom:28px">Vous n\'avez pas encore publié de moto.</div>'}
-  <h3 class="sec">Dernières demandes</h3>
-  ${inq.length ? `<div class="tablewrap"><table><tr><th>Date</th><th>Nom</th><th>Téléphone</th><th>Moto</th><th>Message</th></tr>${inq.map((i) => `<tr><td>${esc(i.created_at.slice(0, 16))}</td><td>${esc(i.name)}</td><td><a href="tel:${esc(i.phone)}">${esc(i.phone)}</a></td><td>${esc(i.title || '—')}</td><td>${esc(i.message || '')}</td></tr>`).join('')}</table></div>` : '<div class="empty">Aucune demande pour le moment.</div>'}
+  <div class="dash-head"><div><span class="tag">Espace gérant</span><h2 style="margin-top:12px">${esc(req.user.shop_name)}</h2><p class="sub" style="margin:10px 0 0">C'est vous qui publiez les annonces de votre boutique et qui suivez les commandes des clients.</p></div><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Publier une annonce</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
+  <div class="kpis">${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}${kpi(motos.filter((m) => m.status === 'disponible').length, 'Annonces en ligne')}${kpi(motos.filter((m) => m.status === 'vendu').length, 'Motos vendues')}</div>
+  ${searchBar('/admin', q)}
+  <h3 class="sec">Commandes</h3>${ordersTable(loadOrders(req.user, q), false)}
+  <h3 class="sec">Mes annonces</h3>
+  ${motos.length ? `<div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motoRows(motos)}</table></div>` : '<div class="empty" style="margin-bottom:28px">Vous n\'avez pas encore publié de moto. Cliquez sur « Publier une annonce ».</div>'}
+  <h3 class="sec">Demandes de rappel</h3>${inquiriesTable(loadInquiries(req.user, q), false)}
   </div></section>` });
 });
 
+function setStatus(req, res, kind) {
+  const row = db.prepare(`SELECT * FROM ${kind} WHERE id=?`).get(req.params.id);
+  if (!row || (req.user.role !== 'super' && row.shop_id !== req.user.id)) { flash(res, 'err', 'Introuvable.'); return null; }
+  return row;
+}
+app.post('/admin/commande/:id(\\d+)/statut', requireAuth, (req, res) => {
+  const o = setStatus(req, res, 'orders');
+  const st = String(req.body.status || '');
+  if (o && ORDER_STATUS[st]) { db.prepare("UPDATE orders SET status=?, updated_at=datetime('now') WHERE id=?").run(st, o.id); flash(res, 'ok', `Commande n°${o.id} : ${ORDER_STATUS[st].toLowerCase()}.`); }
+  else if (o) flash(res, 'err', 'Statut invalide.');
+  res.redirect(homeOf(req.user));
+});
+app.post('/admin/demande/:id(\\d+)/traitee', requireAuth, (req, res) => {
+  const i = setStatus(req, res, 'inquiries');
+  if (i) { db.prepare('UPDATE inquiries SET handled=? WHERE id=?').run(i.handled ? 0 : 1, i.id); flash(res, 'ok', i.handled ? 'Demande rouverte.' : 'Demande marquée comme traitée.'); }
+  res.redirect(homeOf(req.user));
+});
+
+// ---- annonces (photos multiples) ----
 app.get('/admin/moto/nouvelle', requireAuth, (req, res) => {
-  res.locals.render({ title: 'Ajouter une moto', body: `<section><div class="wrap narrow" style="max-width:640px"><h2>Ajouter une moto</h2><p class="sub">Boutique : <b>${esc(req.user.shop_name)}</b></p><div class="panel">${motoForm({}, '/admin/moto/nouvelle', 'Publier la moto')}</div></div></section>` });
+  res.locals.render({ title: 'Publier une annonce', body: `<section><div class="wrap narrow" style="max-width:680px"><h2>Publier une annonce</h2><p class="sub">Boutique : <b>${esc(req.user.shop_name)}</b>. L'annonce apparaît tout de suite sur la page d'accueil.</p><div class="panel">${motoForm({}, '/admin/moto/nouvelle', 'Publier la moto', { canFeature: req.user.role === 'super' })}</div></div></section>` });
 });
 app.post('/admin/moto/nouvelle', requireAuth, handleUpload, (req, res) => {
   const d = parseMoto(req.body);
-  if (!d) { if (req.file) rmFile(req.file.filename); flash(res, 'err', 'Vérifiez le nom, le type et le prix.'); return res.redirect('/admin/moto/nouvelle'); }
-  db.prepare('INSERT INTO motos (user_id,title,brand,type,price,description,image,status) VALUES (?,?,?,?,?,?,?,?)')
-    .run(req.user.id, d.title, d.brand, d.type, d.price, d.description, req.file?.filename || null, d.status);
-  flash(res, 'ok', 'Moto publiée.'); res.redirect(req.user.role === 'super' ? '/super' : '/admin');
+  if (!d) { discardSaved(req.saved); flash(res, 'err', 'Vérifiez le nom, le type et le prix.'); return res.redirect('/admin/moto/nouvelle'); }
+  const r = db.prepare('INSERT INTO motos (user_id,title,brand,type,price,description,status,year,mileage,color,etat,negotiable,featured) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(req.user.id, d.title, d.brand, d.type, d.price, d.description, d.status, d.year, d.mileage, d.color, d.etat, d.negotiable, req.user.role === 'super' ? d.featured : 0);
+  writePhotos(Number(r.lastInsertRowid), req.saved.images);
+  flash(res, 'ok', 'Annonce publiée : elle est visible sur la page d\'accueil.'); res.redirect(homeOf(req.user));
 });
 
 function ownMoto(req, res) {
@@ -317,77 +467,97 @@ function ownMoto(req, res) {
 }
 app.get('/admin/moto/:id(\\d+)/modifier', requireAuth, (req, res) => {
   const m = ownMoto(req, res); if (!m) return;
-  res.locals.render({ title: 'Modifier la moto', body: `<section><div class="wrap narrow" style="max-width:640px"><h2>Modifier la moto</h2><p class="sub">Boutique : <b>${esc(m.shop_name)}</b></p><div class="panel">${motoForm(m, `/admin/moto/${m.id}/modifier`, 'Enregistrer')}</div></div></section>` });
+  res.locals.render({ title: 'Modifier la moto', body: `<section><div class="wrap narrow" style="max-width:680px"><h2>Modifier la moto</h2><p class="sub">Boutique : <b>${esc(m.shop_name)}</b></p><div class="panel">${motoForm(m, `/admin/moto/${m.id}/modifier`, 'Enregistrer', { photos: photosOf(m.id), canFeature: req.user.role === 'super' })}</div></div></section>` });
 });
 app.post('/admin/moto/:id(\\d+)/modifier', requireAuth, handleUpload, (req, res) => {
-  const m = ownMoto(req, res); if (!m) { if (req.file) rmFile(req.file.filename); return; }
+  const m = ownMoto(req, res); if (!m) { discardSaved(req.saved); return; }
   const d = parseMoto(req.body);
-  if (!d) { if (req.file) rmFile(req.file.filename); flash(res, 'err', 'Vérifiez le nom, le type et le prix.'); return res.redirect(`/admin/moto/${m.id}/modifier`); }
-  const image = req.file ? req.file.filename : m.image;
-  db.prepare('UPDATE motos SET title=?,brand=?,type=?,price=?,description=?,image=?,status=? WHERE id=?').run(d.title, d.brand, d.type, d.price, d.description, image, d.status, m.id);
-  if (req.file) rmFile(m.image);
-  flash(res, 'ok', 'Moto mise à jour.'); res.redirect(req.user.role === 'super' ? '/super' : '/admin');
+  const back = `/admin/moto/${m.id}/modifier`;
+  if (!d) { discardSaved(req.saved); flash(res, 'err', 'Vérifiez le nom, le type et le prix.'); return res.redirect(back); }
+  const cur = photosOf(m.id);
+  const remove = new Set([].concat(req.body.remove_img || []).map(String));
+  let keep = cur.filter((p) => !remove.has(String(p.id)));
+  if (keep.length + req.saved.images.length > MAX_PHOTOS) { discardSaved(req.saved); flash(res, 'err', `Maximum ${MAX_PHOTOS} photos par annonce : supprimez-en avant d'en ajouter.`); return res.redirect(back); }
+  const cover = keep.find((p) => String(p.id) === String(req.body.cover));
+  if (cover) keep = [cover, ...keep.filter((p) => p !== cover)];
+  cur.filter((p) => remove.has(String(p.id))).forEach((p) => rmFile(p.filename));
+  writePhotos(m.id, [...keep.map((p) => p.filename), ...req.saved.images]);
+  db.prepare('UPDATE motos SET title=?,brand=?,type=?,price=?,description=?,status=?,year=?,mileage=?,color=?,etat=?,negotiable=?,featured=? WHERE id=?')
+    .run(d.title, d.brand, d.type, d.price, d.description, d.status, d.year, d.mileage, d.color, d.etat, d.negotiable, req.user.role === 'super' ? d.featured : m.featured, m.id);
+  flash(res, 'ok', 'Annonce mise à jour.'); res.redirect(homeOf(req.user));
 });
 app.post('/admin/moto/:id(\\d+)/supprimer', requireAuth, (req, res) => {
   const m = ownMoto(req, res); if (!m) return;
-  db.prepare('DELETE FROM motos WHERE id=?').run(m.id); rmFile(m.image);
-  flash(res, 'ok', 'Moto supprimée.'); res.redirect(req.user.role === 'super' ? '/super' : '/admin');
+  removeMotoFiles(m.id); db.prepare('DELETE FROM motos WHERE id=?').run(m.id);
+  flash(res, 'ok', 'Annonce supprimée.'); res.redirect(homeOf(req.user));
 });
 
+// ---- profil (téléphone, WhatsApp, logo, mot de passe) ----
 app.get('/admin/profil', requireAuth, (req, res) => {
   res.locals.render({ title: 'Mon profil', body: `<section><div class="wrap narrow"><h2>Mon profil</h2><p class="sub">${esc(req.user.email)}</p>
-  <form class="stack panel" method="post" action="/admin/profil"><label>Téléphone (appels)<input name="phone" value="${esc(req.user.phone)}" maxlength="30"></label>
-  <label>Numéro WhatsApp<input name="whatsapp" value="${esc(req.user.whatsapp)}" maxlength="30"></label>
+  <form class="stack panel" method="post" action="/admin/profil" enctype="multipart/form-data"><label>Téléphone (appels)<input name="phone" value="${esc(req.user.phone)}" maxlength="30"></label>
+  <label>Numéro WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" value="${esc(req.user.whatsapp)}" maxlength="30"></label>
+  <label>Logo de la boutique <span class="hint">(facultatif)</span>${req.user.logo ? `<span class="logoprev"><img src="/uploads/${esc(req.user.logo)}" alt="" width="56" height="56"><span class="chk"><input type="checkbox" name="remove_logo" value="1"> Retirer le logo</span></span>` : ''}<input type="file" name="logo" accept="image/jpeg,image/png,image/webp"></label>
   <label>Nouveau mot de passe <span class="hint">(laisser vide pour ne pas changer, 8 caractères minimum)</span><input type="password" name="password" minlength="8" autocomplete="new-password"></label>
   <button class="btn" type="submit">Enregistrer</button></form></div></section>` });
 });
-app.post('/admin/profil', requireAuth, (req, res) => {
+app.post('/admin/profil', requireAuth, handleUpload, (req, res) => {
   const pw = String(req.body.password || '');
-  if (pw && pw.length < 8) { flash(res, 'err', 'Mot de passe trop court (8 caractères minimum).'); return res.redirect('/admin/profil'); }
+  if (pw && pw.length < 8) { discardSaved(req.saved); flash(res, 'err', 'Mot de passe trop court (8 caractères minimum).'); return res.redirect('/admin/profil'); }
   db.prepare('UPDATE users SET phone=?, whatsapp=? WHERE id=?').run(String(req.body.phone || '').slice(0, 30), String(req.body.whatsapp || '').slice(0, 30), req.user.id);
+  if (req.saved.logo || isOn(req.body.remove_logo)) { rmFile(req.user.logo); db.prepare('UPDATE users SET logo=? WHERE id=?').run(req.saved.logo || null, req.user.id); }
   if (pw) {
     db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), req.user.id);
     // les anciennes sessions (autres appareils) sont invalidées ; celle-ci est renouvelée
     res.cookie('sid', makeToken(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)), { httpOnly: true, sameSite: 'lax', secure: PROD, maxAge: 8 * 3600e3 });
   }
-  flash(res, 'ok', 'Profil mis à jour.'); res.redirect(req.user.role === 'super' ? '/super' : '/admin');
+  flash(res, 'ok', 'Profil mis à jour.'); res.redirect(homeOf(req.user));
 });
 
 // ================= SUPER ADMIN =================
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
 app.get('/super', requireAuth, requireSuper, (req, res) => {
-  const shops = db.prepare(`SELECT u.*, (SELECT COUNT(*) FROM motos WHERE user_id=u.id) AS nb FROM users u WHERE u.role='admin' ORDER BY u.id DESC`).all();
-  const motos = db.prepare('SELECT m.*, u.shop_name, u.active FROM motos m JOIN users u ON u.id=m.user_id ORDER BY m.id DESC').all();
-  const inq = db.prepare('SELECT i.*, m.title, u.shop_name FROM inquiries i LEFT JOIN motos m ON m.id=i.moto_id LEFT JOIN users u ON u.id=i.shop_id ORDER BY i.id DESC LIMIT 30').all();
+  const q = searchQ(req); const c = newCounts(req.user);
+  const users = db.prepare(`SELECT u.*, (SELECT COUNT(*) FROM motos WHERE user_id=u.id) AS nb, (SELECT COUNT(*) FROM orders WHERE shop_id=u.id AND status='nouvelle') AS newo FROM users u ORDER BY u.id DESC`).all();
+  const shops = users.filter((u) => u.role === 'admin'); const admins = users.filter((u) => u.role === 'super');
+  const motos = db.prepare('SELECT m.*, u.shop_name, u.active FROM motos m JOIN users u ON u.id=m.user_id ORDER BY m.id DESC LIMIT 300').all();
   const total = motos.reduce((s, m) => s + m.price, 0);
+  const kpi = (n, l) => `<div class="kpi reveal"><strong data-count="${n}">${n}</strong><span>${l}</span></div>`;
+  const acctRows = (list) => list.map((s) => {
+    const self = s.id === req.user.id;
+    return `<tr><td>${s.logo ? `<img class="shoplogo" src="/uploads/${esc(s.logo)}" alt="" width="22" height="22"> ` : ''}<b>${esc(s.shop_name)}</b>${self ? ' <span class="pill on">vous</span>' : ''}</td><td>${esc(s.email)}</td><td>${esc(s.phone || '')}</td><td>${s.nb}${s.newo ? ` <span class="pill new">${s.newo} cmd</span>` : ''}</td><td><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'Actif' : 'Suspendu'}</span></td>
+    <td><div class="actions">${self ? '<a class="btn alt sm" href="/admin/profil">Mon profil</a>' : `<a class="btn alt sm" href="/super/boutique/${s.id}/modifier">Modifier</a>
+    <form method="post" action="/super/boutique/${s.id}/${s.active ? 'suspendre' : 'activer'}"><button class="btn alt sm">${s.active ? 'Suspendre' : 'Réactiver'}</button></form>
+    <form method="post" action="/super/boutique/${s.id}/mdp" data-prompt-password="Nouveau mot de passe (8 caractères min.) :"><input type="hidden" name="password"><button class="btn alt sm">Mot de passe</button></form>
+    <form method="post" action="/super/boutique/${s.id}/supprimer" data-confirm="Supprimer ce compte${s.role === 'admin' ? ', toutes ses annonces et ses commandes' : ''} ? Cette action est définitive."><button class="btn danger sm">Supprimer</button></form>`}</div></td></tr>`;
+  }).join('');
   res.locals.render({ title: 'Super administrateur', body: `<section><div class="wrap">
   <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
   ${storageIsPersistent() ? '' : '<div class="flash err" role="alert" style="margin:0 0 24px"><b>Stockage temporaire.</b> Le disque permanent n\'est pas encore branché : les boutiques, motos et photos seront effacées à la prochaine mise à jour du site. Ajoutez le disque Render (chemin /var/data).</div>'}
-  <div class="kpis"><div class="kpi reveal"><strong data-count="${shops.length}">${shops.length}</strong><span>Boutiques</span></div><div class="kpi reveal"><strong data-count="${motos.length}">${motos.length}</strong><span>Annonces au total</span></div><div class="kpi reveal"><strong data-count="${motos.filter((m) => m.status === 'disponible').length}">${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi reveal"><strong data-count="${inq.length}">${inq.length}</strong><span>Demandes récentes</span></div></div>
-
+  <div class="kpis">${kpi(shops.length, 'Boutiques')}${kpi(motos.length, 'Annonces au total')}${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}</div>
   <div class="guide reveal"><b>Comment ça marche</b>
     <ol><li><span>Vous créez le compte d'une boutique (ci-dessous) : nom, e-mail et mot de passe du gérant.</span></li>
-    <li><span>Le gérant se connecte sur <i>Espace boutique</i> et publie lui-même ses annonces (prix, photo, nom de la boutique).</span></li>
-    <li><span>Vous voyez tout ici : boutiques, annonces, demandes des clients. Vous pouvez modifier, suspendre ou supprimer.</span></li></ol></div>
+    <li><span>Le gérant se connecte sur <i>Espace boutique</i>, publie ses annonces (jusqu'à 5 photos) et suit les commandes de ses clients.</span></li>
+    <li><span>Vous voyez tout ici : boutiques, annonces, commandes, demandes. Vous pouvez modifier, suspendre ou supprimer, et mettre une moto « À la une ».</span></li></ol></div>
+  ${searchBar('/super', q)}
+  <h3 class="sec">Commandes <span class="hint">(toutes boutiques)</span></h3>${ordersTable(loadOrders(req.user, q), true)}
+  <h3 class="sec">Demandes de rappel</h3>${inquiriesTable(loadInquiries(req.user, q), true)}
 
   <h3 class="sec">Boutiques et leurs gérants <span class="hint">(ce sont eux qui publient les annonces)</span></h3>
-  <div class="tablewrap"><table><tr><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th>Motos</th><th>Statut</th><th></th></tr>
-  ${shops.map((s) => `<tr><td><b>${esc(s.shop_name)}</b></td><td>${esc(s.email)}</td><td>${esc(s.phone || '')}</td><td>${s.nb}</td><td><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'Actif' : 'Suspendu'}</span></td>
-  <td><div class="actions"><form method="post" action="/super/boutique/${s.id}/${s.active ? 'suspendre' : 'activer'}"><button class="btn alt sm">${s.active ? 'Suspendre' : 'Réactiver'}</button></form>
-  <form method="post" action="/super/boutique/${s.id}/mdp" data-prompt-password="Nouveau mot de passe (8 caractères min.) :"><input type="hidden" name="password"><button class="btn alt sm">Mot de passe</button></form>
-  <form method="post" action="/super/boutique/${s.id}/supprimer" data-confirm="Supprimer cette boutique et toutes ses motos ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="6">Aucune boutique.</td></tr>'}</table></div>
+  <div class="tablewrap"><table><tr><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th>Annonces</th><th>Statut</th><th></th></tr>${acctRows(shops) || '<tr><td colspan="6">Aucune boutique.</td></tr>'}</table></div>
 
-  <h3 class="sec">Créer une boutique et son gérant <span class="hint">(le gérant pourra publier des annonces)</span></h3>
-  <form class="stack panel" method="post" action="/super/boutique" style="margin-bottom:28px"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan"></label><label>E-mail du gérant (pour se connecter)<input type="email" name="email" required></label></div>
-  <div class="two"><label>Téléphone<input name="phone" maxlength="30"></label><label>WhatsApp<input name="whatsapp" maxlength="30"></label></div>
-  <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label><button class="btn" type="submit">Créer la boutique et le gérant</button></form>
+  <h3 class="sec">Créer un compte</h3>
+  <form class="stack panel" method="post" action="/super/boutique" style="margin-bottom:28px"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan"></label><label>E-mail de connexion<input type="email" name="email" required></label></div>
+  <div class="two"><label>Téléphone<input name="phone" maxlength="30"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" maxlength="30"></label></div>
+  <div class="two"><label>Type de compte<select name="role"><option value="admin">Gérant de boutique (publie des annonces)</option><option value="super">Super administrateur (voit et gère tout)</option></select></label>
+  <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label></div>
+  <button class="btn" type="submit">Créer le compte</button></form>
 
-  <h3 class="sec">Toutes les motos <span class="hint">(valeur totale du catalogue : ${fcfa(total)})</span></h3>
-  <div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Boutique</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>
-  ${motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a></td><td>${esc(m.shop_name)}${m.active ? '' : ' <span class="pill off">suspendue</span>'}</td><td>${esc(m.type)}</td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
-  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="7">Aucune moto.</td></tr>'}</table></div>
+  <h3 class="sec">Super administrateurs</h3>
+  <div class="tablewrap"><table><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th>Annonces</th><th>Statut</th><th></th></tr>${acctRows(admins)}</table></div>
 
-  <h3 class="sec">Demandes récentes (toutes boutiques)</h3>
-  ${inq.length ? `<div class="tablewrap"><table><tr><th>Date</th><th>Nom</th><th>Téléphone</th><th>Boutique</th><th>Moto / sujet</th><th>Message</th></tr>${inq.map((i) => `<tr><td>${esc(i.created_at.slice(0, 16))}</td><td>${esc(i.name)}</td><td><a href="tel:${esc(i.phone)}">${esc(i.phone)}</a></td><td>${esc(i.shop_name || '—')}</td><td>${esc(i.title || i.subject || '—')}</td><td>${esc(i.message || '')}</td></tr>`).join('')}</table></div>` : '<div class="empty">Aucune demande.</div>'}
+  <h3 class="sec">Toutes les annonces <span class="hint">(valeur du catalogue : ${fcfa(total)})</span></h3>
+  <div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Boutique</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motoRows(motos, { showShop: true }) || '<tr><td colspan="7">Aucune moto.</td></tr>'}</table></div>
   </div></section>` });
 });
 
@@ -398,33 +568,65 @@ app.get('/super/sauvegarde', requireAuth, requireSuper, (req, res) => {
 
 app.post('/super/boutique', requireAuth, requireSuper, (req, res) => {
   const b = req.body; const email = String(b.email || '').trim().toLowerCase(); const shop = String(b.shop_name || '').trim().slice(0, 80);
-  if (!shop || !/^\S+@\S+\.\S+$/.test(email) || String(b.password || '').length < 8) { flash(res, 'err', 'Vérifiez le nom, l\'e-mail et le mot de passe (8 caractères minimum).'); return res.redirect('/super'); }
+  const role = b.role === 'super' ? 'super' : 'admin';
+  if (!shop || !EMAIL_RE.test(email) || String(b.password || '').length < 8) { flash(res, 'err', 'Vérifiez le nom, l\'e-mail et le mot de passe (8 caractères minimum).'); return res.redirect('/super'); }
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail.'); return res.redirect('/super'); }
-  db.prepare('INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp) VALUES (?,?,?,?,?,?)').run(email, bcrypt.hashSync(String(b.password), 10), 'admin', shop, String(b.phone || '').slice(0, 30), String(b.whatsapp || b.phone || '').slice(0, 30));
-  flash(res, 'ok', `Boutique « ${shop} » créée.`); res.redirect('/super');
+  db.prepare('INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp) VALUES (?,?,?,?,?,?)').run(email, bcrypt.hashSync(String(b.password), 10), role, shop, String(b.phone || '').slice(0, 30), String(b.whatsapp || b.phone || '').slice(0, 30));
+  flash(res, 'ok', role === 'super' ? `Super administrateur « ${shop} » créé.` : `Boutique « ${shop} » créée : son gérant peut se connecter et publier.`); res.redirect('/super');
 });
-const shopAction = (fn, msg) => (req, res) => {
-  const s = db.prepare("SELECT * FROM users WHERE id=? AND role='admin'").get(req.params.id);
-  if (s) { fn(s, req); flash(res, 'ok', msg(s)); } else flash(res, 'err', 'Boutique introuvable.');
-  res.redirect('/super');
+
+// action sur un compte (jamais sur soi-même ; il doit toujours rester un super administrateur actif)
+const accountAction = (fn, msg, { guardLastSuper = false } = {}) => (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u) { flash(res, 'err', 'Compte introuvable.'); return res.redirect('/super'); }
+  if (u.id === req.user.id) { flash(res, 'err', 'Vous ne pouvez pas faire cela sur votre propre compte.'); return res.redirect('/super'); }
+  if (guardLastSuper && u.role === 'super' && db.prepare("SELECT COUNT(*) c FROM users WHERE role='super' AND active=1 AND id<>?").get(u.id).c < 1) {
+    flash(res, 'err', 'Il doit rester au moins un super administrateur actif.'); return res.redirect('/super');
+  }
+  fn(u, req); flash(res, 'ok', msg(u)); res.redirect('/super');
 };
-app.post('/super/boutique/:id(\\d+)/suspendre', requireAuth, requireSuper, shopAction((s) => db.prepare('UPDATE users SET active=0 WHERE id=?').run(s.id), (s) => `${s.shop_name} est suspendue (ses motos sont masquées).`));
-app.post('/super/boutique/:id(\\d+)/activer', requireAuth, requireSuper, shopAction((s) => db.prepare('UPDATE users SET active=1 WHERE id=?').run(s.id), (s) => `${s.shop_name} est réactivée.`));
+app.post('/super/boutique/:id(\\d+)/suspendre', requireAuth, requireSuper, accountAction((u) => db.prepare('UPDATE users SET active=0 WHERE id=?').run(u.id), (u) => `${u.shop_name} est suspendu (ses annonces sont masquées).`, { guardLastSuper: true }));
+app.post('/super/boutique/:id(\\d+)/activer', requireAuth, requireSuper, accountAction((u) => db.prepare('UPDATE users SET active=1 WHERE id=?').run(u.id), (u) => `${u.shop_name} est réactivé.`));
 app.post('/super/boutique/:id(\\d+)/mdp', requireAuth, requireSuper, (req, res) => {
   const pw = String(req.body.password || '');
   if (pw.length < 8) { flash(res, 'err', 'Mot de passe trop court.'); return res.redirect('/super'); }
-  return shopAction((s) => db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), s.id), (s) => `Mot de passe de ${s.shop_name} modifié.`)(req, res);
+  return accountAction((u) => db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), u.id), (u) => `Mot de passe de ${u.shop_name} modifié.`)(req, res);
 });
-app.post('/super/boutique/:id(\\d+)/supprimer', requireAuth, requireSuper, shopAction((s) => {
-  db.prepare('SELECT image FROM motos WHERE user_id=?').all(s.id).forEach((m) => rmFile(m.image));
-  db.prepare('DELETE FROM users WHERE id=?').run(s.id);
-}, (s) => `${s.shop_name} supprimée.`));
+app.post('/super/boutique/:id(\\d+)/supprimer', requireAuth, requireSuper, accountAction((u) => {
+  db.prepare('SELECT id FROM motos WHERE user_id=?').all(u.id).forEach((m) => removeMotoFiles(m.id));
+  rmFile(u.logo);
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+}, (u) => `${u.shop_name} supprimé.`, { guardLastSuper: true }));
+
+app.get('/super/boutique/:id(\\d+)/modifier', requireAuth, requireSuper, (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u) { flash(res, 'err', 'Compte introuvable.'); return res.redirect('/super'); }
+  if (u.id === req.user.id) return res.redirect('/admin/profil');
+  res.locals.render({ title: `Modifier ${u.shop_name}`, body: `<section><div class="wrap narrow" style="max-width:620px"><h2>Modifier le compte</h2><p class="sub">${u.role === 'super' ? 'Super administrateur' : 'Gérant de boutique'}</p>
+  <form class="stack panel" method="post" action="/super/boutique/${u.id}/modifier" enctype="multipart/form-data">
+  <label>Nom de la boutique<input name="shop_name" required maxlength="80" value="${esc(u.shop_name)}"></label>
+  <label>E-mail de connexion<input type="email" name="email" required value="${esc(u.email)}"></label>
+  <div class="two"><label>Téléphone<input name="phone" maxlength="30" value="${esc(u.phone)}"></label><label>WhatsApp<input name="whatsapp" maxlength="30" value="${esc(u.whatsapp)}"></label></div>
+  <label>Logo de la boutique <span class="hint">(facultatif)</span>${u.logo ? `<span class="logoprev"><img src="/uploads/${esc(u.logo)}" alt="" width="56" height="56"><span class="chk"><input type="checkbox" name="remove_logo" value="1"> Retirer le logo</span></span>` : ''}<input type="file" name="logo" accept="image/jpeg,image/png,image/webp"></label>
+  <div class="actions"><button class="btn" type="submit">Enregistrer</button><a class="btn alt" href="/super">Annuler</a></div></form></div></section>` });
+});
+app.post('/super/boutique/:id(\\d+)/modifier', requireAuth, requireSuper, handleUpload, (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u || u.id === req.user.id) { discardSaved(req.saved); flash(res, 'err', 'Compte introuvable.'); return res.redirect('/super'); }
+  const back = `/super/boutique/${u.id}/modifier`;
+  const email = String(req.body.email || '').trim().toLowerCase(); const shop = String(req.body.shop_name || '').trim().slice(0, 80);
+  if (!shop || !EMAIL_RE.test(email)) { discardSaved(req.saved); flash(res, 'err', 'Vérifiez le nom et l\'e-mail.'); return res.redirect(back); }
+  if (db.prepare('SELECT 1 FROM users WHERE email=? AND id<>?').get(email, u.id)) { discardSaved(req.saved); flash(res, 'err', 'Un autre compte utilise déjà cet e-mail.'); return res.redirect(back); }
+  db.prepare('UPDATE users SET shop_name=?, email=?, phone=?, whatsapp=? WHERE id=?').run(shop, email, String(req.body.phone || '').slice(0, 30), String(req.body.whatsapp || '').slice(0, 30), u.id);
+  if (req.saved.logo || isOn(req.body.remove_logo)) { rmFile(u.logo); db.prepare('UPDATE users SET logo=? WHERE id=?').run(req.saved.logo || null, u.id); }
+  flash(res, 'ok', `${shop} mis à jour.`); res.redirect('/super');
+});
 
 // ---- 404 + erreurs ----
 app.use((req, res) => res.status(404).send(layout({ title: 'Page introuvable', user: req.user, body: '<section><div class="wrap"><h2>Page introuvable</h2><p class="sub">Cette page n\'existe pas.</p><a class="btn" href="/">Retour à l\'accueil</a></div></section>' })));
 app.use((err, req, res, next) => { console.error(err); res.status(500).send(layout({ title: 'Erreur', body: '<section><div class="wrap"><h2>Une erreur est survenue</h2><p class="sub">Réessayez dans un instant.</p></div></section>' })); });
 
-const created = seed();
+const created = seed(); syncImages();
 const PORT = process.env.PORT || 3000;
 // sauvegarde quotidienne de la base (au démarrage puis toutes les 24 h)
 const runBackup = () => { try { backup(); } catch (e) { console.error('sauvegarde automatique échouée', e.message); } };

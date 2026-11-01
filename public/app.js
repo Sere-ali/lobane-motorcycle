@@ -103,6 +103,20 @@
     });
   }
 
+  // 0j. Galerie de la fiche moto : miniatures cliquables
+  doc.querySelectorAll('.thumb-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var main = doc.querySelector('.gallery .imgbox img'); if (!main) return;
+      main.src = btn.getAttribute('data-src');
+      doc.querySelectorAll('.thumb-btn').forEach(function (b) { b.classList.toggle('on', b === btn); });
+    });
+  });
+
+  // 0k. Listes déroulantes qui s'envoient seules (changer le statut d'une commande)
+  doc.querySelectorAll('select[data-autosubmit]').forEach(function (sel) {
+    sel.addEventListener('change', function () { sel.form.submit(); });
+  });
+
   // 0h. Léger décalage (parallaxe) des motifs du héros
   var hero = doc.querySelector('.hero');
   if (hero && !reduce) {

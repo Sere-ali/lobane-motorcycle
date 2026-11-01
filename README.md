@@ -58,3 +58,11 @@ Au premier démarrage, le compte super admin et deux boutiques de démonstration
 - Sauvegarde : copie quotidienne de la base dans `DATA_DIR/backups` (7 jours conservés) et bouton « Sauvegarde » dans l'espace super admin (téléchargement du fichier `.db`).
 - Le tableau de bord super admin affiche un avertissement tant que le disque permanent Render n'est pas branché sur `/var/data`.
 - Journal des requêtes dans les logs Render ; `/healthz` pour la surveillance.
+
+## Back-office (v3)
+
+- Annonces : jusqu'à 5 photos (couverture au choix), année, kilométrage, couleur, neuf/occasion, prix négociable, « À la une » (super admin).
+- Commandes : le client remplit un court formulaire, la commande est enregistrée (statuts nouvelle / confirmée / livrée / annulée) puis il peut prévenir la boutique sur WhatsApp. Aucun paiement en ligne.
+- Demandes de rappel : marquables « traitées », recherche par nom, numéro ou moto, pastille de nouveautés dans le menu.
+- Comptes : plusieurs super administrateurs, modification d'une boutique (nom, e-mail, téléphone, logo), suspension, suppression, garde-fou « au moins un super admin actif ».
+- Les bases existantes sont migrées automatiquement au démarrage.

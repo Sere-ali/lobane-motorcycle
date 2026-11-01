@@ -31,9 +31,9 @@ const SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden=
 const TYPE_ICON = { 'Moto de ville': 'i-city', 'Tout-terrain': 'i-off', 'Sport / grosse cylindrée': 'i-sport', 'Travail / livraison': 'i-work', Scooter: 'i-scoot', 'Pièces & pneus': 'i-gear' };
 const typeIcon = (t) => `<svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${TYPE_ICON[t] || 'i-city'}"/></svg>`;
 
-function layout({ title, body, user, flash, desc = '', page = '', ride = false }) {
+function layout({ title, body, user, flash, desc = '', page = '', ride = false, badge = 0 }) {
   const nav = (user
-    ? `<a href="${user.role === 'super' ? '/super' : '/admin'}">Mon espace</a><form method="post" action="/deconnexion" class="inline"><button type="submit">Déconnexion</button></form>`
+    ? `<a href="${user.role === 'super' ? '/super' : '/admin'}">Mon espace${badge ? ` <span class="navbadge" aria-label="${badge} nouveauté${badge > 1 ? 's' : ''}">${badge}</span>` : ''}</a><form method="post" action="/deconnexion" class="inline"><button type="submit">Déconnexion</button></form>`
     : `<a href="/connexion">Espace boutique</a>`);
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -61,39 +61,58 @@ ${flash ? `<div class="wrap"><div class="flash ${esc(flash.type)}" role="status"
 </body></html>`;
 }
 
+const km = (n) => new Intl.NumberFormat('fr-FR').format(n) + ' km';
+const specLine = (m) => [m.year, m.mileage != null ? km(m.mileage) : null, m.color].filter(Boolean).map(esc).join(' · ');
+const etatBadge = (m) => `<span class="bdg ${m.etat === 'occasion' ? 'occ' : 'neuf'}">${m.etat === 'occasion' ? 'Occasion' : 'Neuf'}</span>`;
+const shopLine = (m) => `<span class="shop">${m.logo ? `<img class="shoplogo" src="/uploads/${esc(m.logo)}" alt="" width="22" height="22" loading="lazy">` : ''}${esc(m.shop_name)}</span>`;
+
 function motoCard(m) {
+  const specs = specLine(m);
   return `<article class="card moto reveal">
-  <a href="/moto/${m.id}" class="imgbox" aria-label="Voir ${esc(m.title)}">${motoImg(m)}${m.status === 'vendu' ? '<span class="soldtag">Vendu</span>' : ''}</a>
+  <a href="/moto/${m.id}" class="imgbox" aria-label="Voir ${esc(m.title)}">${motoImg(m)}${m.status === 'vendu' ? '<span class="soldtag">Vendu</span>' : ''}
+    <span class="badges">${m.featured ? '<span class="bdg star">★ À la une</span>' : ''}${etatBadge(m)}</span></a>
   <div class="info">
-    <span class="shop">${esc(m.shop_name)}</span>
+    ${shopLine(m)}
     <h3><a href="/moto/${m.id}">${esc(m.title)}</a></h3>
-    <small>${esc(m.type)}${m.brand ? ' · ' + esc(m.brand) : ''}</small>
-    <div class="row"><span class="price">${fcfa(m.price)}</span><a class="btn alt sm" href="/moto/${m.id}">Détails</a></div>
-    ${m.status === 'vendu' ? '' : `<a class="btn wa order" href="https://wa.me/${digits(m.whatsapp || m.phone) || '2250505137178'}?text=${encodeURIComponent(`Bonjour, je veux commander la moto « ${m.title} » (${fcfa(m.price)}) vue sur le site Lobane Motorcycle.`)}" target="_blank" rel="noopener">💬 Commander</a>`}
+    <small>${esc(m.type)}${m.brand ? ' · ' + esc(m.brand) : ''}${specs ? '<br>' + specs : ''}</small>
+    <div class="row"><span class="price">${fcfa(m.price)}${m.negotiable ? '<em class="nego">négociable</em>' : ''}</span><a class="btn alt sm" href="/moto/${m.id}">Détails</a></div>
+    ${m.status === 'vendu' ? '' : `<a class="btn wa order" href="/moto/${m.id}/commander">🛒 Commander</a>`}
   </div></article>`;
 }
 
-function filterForm({ q = '', type = '', shop = '', min = '', max = '' }, shops) {
+function filterForm({ q = '', type = '', shop = '', min = '', max = '', etat = '' }, shops) {
   return `<form class="filters" method="get" action="/motos">
   <input name="q" value="${esc(q)}" placeholder="Rechercher (marque, modèle…)">
   <select name="type"><option value="">Tous les types</option>${TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+  <select name="etat"><option value="">Neuf et occasion</option><option value="neuf" ${etat === 'neuf' ? 'selected' : ''}>Neuf</option><option value="occasion" ${etat === 'occasion' ? 'selected' : ''}>Occasion</option></select>
   <select name="shop"><option value="">Toutes les boutiques</option>${shops.map((s) => `<option value="${s.id}" ${String(s.id) === String(shop) ? 'selected' : ''}>${esc(s.shop_name)}</option>`).join('')}</select>
   <input name="min" type="number" min="0" value="${esc(min)}" placeholder="Prix min">
   <input name="max" type="number" min="0" value="${esc(max)}" placeholder="Prix max">
   <button class="btn" type="submit">Filtrer</button></form>`;
 }
 
-function motoForm(m = {}, action, label) {
+function motoForm(m = {}, action, label, { photos = [], canFeature = false } = {}) {
+  const thisYear = new Date().getFullYear();
   return `<form class="stack" method="post" action="${action}" enctype="multipart/form-data">
   <label>Nom de la moto<input name="title" required maxlength="120" value="${esc(m.title)}"></label>
   <div class="two"><label>Marque<input name="brand" maxlength="60" value="${esc(m.brand)}"></label>
   <label>Type<select name="type" required>${TYPES.map((t) => `<option ${t === m.type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label></div>
   <div class="two"><label>Prix (F CFA)<input name="price" type="number" min="0" step="1000" required value="${esc(m.price)}"></label>
   <label>Statut<select name="status"><option value="disponible" ${m.status !== 'vendu' ? 'selected' : ''}>Disponible</option><option value="vendu" ${m.status === 'vendu' ? 'selected' : ''}>Vendu</option></select></label></div>
+  <div class="two"><label>État<select name="etat"><option value="neuf" ${m.etat !== 'occasion' ? 'selected' : ''}>Neuf</option><option value="occasion" ${m.etat === 'occasion' ? 'selected' : ''}>Occasion</option></select></label>
+  <label>Année <span class="hint">(facultatif)</span><input name="year" type="number" min="1980" max="${thisYear + 1}" value="${esc(m.year)}" placeholder="${thisYear}"></label></div>
+  <div class="two"><label>Kilométrage <span class="hint">(facultatif)</span><input name="mileage" type="number" min="0" max="1000000" step="1" value="${esc(m.mileage)}" placeholder="Ex. 12000"></label>
+  <label>Couleur <span class="hint">(facultatif)</span><input name="color" maxlength="40" value="${esc(m.color)}" placeholder="Ex. Noir"></label></div>
+  <label class="chk"><input type="checkbox" name="negotiable" value="1" ${m.negotiable ? 'checked' : ''}> Prix négociable</label>
+  ${canFeature ? `<label class="chk"><input type="checkbox" name="featured" value="1" ${m.featured ? 'checked' : ''}> Mettre cette moto « À la une » (affichée en premier)</label>` : ''}
   <label>Description<textarea name="description" rows="4" maxlength="2000">${esc(m.description)}</textarea></label>
-  <label>Photo (JPG, PNG ou WebP, 5 Mo max)<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
-  ${m.image ? `<p class="hint">Photo actuelle : <img class="thumb" src="/uploads/${esc(m.image)}" alt=""> – laissez vide pour la conserver.</p>` : ''}
+  <fieldset class="photos"><legend>Photos <span class="hint">(jusqu'à 5, la première est la couverture)</span></legend>
+  ${photos.length ? `<div class="photo-grid">${photos.map((p, i) => `<div class="ph-item"><img src="/uploads/${esc(p.filename)}" alt="" loading="lazy">
+    <label class="chk"><input type="radio" name="cover" value="${p.id}" ${i === 0 ? 'checked' : ''}> Couverture</label>
+    <label class="chk"><input type="checkbox" name="remove_img" value="${p.id}"> Supprimer</label></div>`).join('')}</div>` : ''}
+  <label>Ajouter des photos<input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple></label>
+  <p class="hint">JPG, PNG ou WebP, 5 Mo maximum par photo. Elles sont réduites automatiquement pour charger vite sur téléphone.</p></fieldset>
   <button class="btn" type="submit">${label}</button></form>`;
 }
 
-module.exports = { esc, fcfa, digits, layout, motoCard, filterForm, motoForm, motoImg, typeIcon, TYPES };
+module.exports = { esc, fcfa, digits, km, specLine, etatBadge, shopLine, layout, motoCard, filterForm, motoForm, motoImg, typeIcon, TYPES };

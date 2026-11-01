@@ -54,6 +54,48 @@ CREATE INDEX IF NOT EXISTS idx_motos_status ON motos(status);
 CREATE INDEX IF NOT EXISTS idx_inq_shop ON inquiries(shop_id, id);
 `);
 
+// ---- migrations (idempotentes : s'appliquent aussi à une base existante) ----
+const hasCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
+const addCol = (t, c, def) => { if (!hasCol(t, c)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); };
+addCol('motos', 'year', 'INTEGER');
+addCol('motos', 'mileage', 'INTEGER');
+addCol('motos', 'color', 'TEXT');
+addCol('motos', 'etat', "TEXT NOT NULL DEFAULT 'neuf'");
+addCol('motos', 'negotiable', 'INTEGER NOT NULL DEFAULT 0');
+addCol('motos', 'featured', 'INTEGER NOT NULL DEFAULT 0');
+addCol('users', 'logo', 'TEXT');
+addCol('inquiries', 'handled', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+CREATE TABLE IF NOT EXISTS moto_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  moto_id INTEGER NOT NULL REFERENCES motos(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_mi_moto ON moto_images(moto_id, position);
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  moto_id INTEGER REFERENCES motos(id) ON DELETE SET NULL,
+  moto_title TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  place TEXT,
+  message TEXT,
+  status TEXT NOT NULL DEFAULT 'nouvelle' CHECK (status IN ('nouvelle','confirmee','livree','annulee')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orders_shop ON orders(shop_id, status, id);
+`);
+// Les photos « couverture » existantes (motos.image) entrent dans la galerie.
+function syncImages() {
+  db.exec(`INSERT INTO moto_images (moto_id, filename, position)
+    SELECT id, image, 0 FROM motos WHERE image IS NOT NULL AND NOT EXISTS (SELECT 1 FROM moto_images WHERE moto_id = motos.id)`);
+}
+syncImages();
+
 // Sauvegarde cohérente de la base (VACUUM INTO) : une copie par jour, on garde les 7 dernières.
 function backup(keep = 7) {
   const dir = path.join(DATA_DIR, 'backups');
@@ -103,4 +145,4 @@ function seed() {
   return { email, password, generated };
 }
 
-module.exports = { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent };
+module.exports = { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent, syncImages };
