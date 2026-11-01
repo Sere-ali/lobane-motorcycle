@@ -657,3 +657,15 @@ nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: tr
 .dashhero .speed { background: linear-gradient(90deg, transparent, rgba(255,255,255,.7)); }
 .dashhero .rider { aspect-ratio: 886 / 774; }
 @media (max-width: 760px) { .dashhero-road { margin: 0 -18px; height: 150px; } }
+
+/* ===== moto qui traverse toute la bannière, au premier plan (de droite à gauche, comme elle regarde) ===== */
+.dashhero { display: block; padding-bottom: 74px; }
+.dashhero-text { padding-bottom: 26px; position: relative; z-index: 1; }
+.dashhero-road { position: absolute; left: 0; right: 0; bottom: 0; margin: 0 !important; height: 100%; z-index: 2; pointer-events: none; background: transparent; overflow: hidden; border-radius: inherit; }
+.dashhero .lane { height: 40px; z-index: 0; }
+.dashhero .rider { position: absolute; z-index: 3; left: auto; right: 0; bottom: 26px; height: clamp(150px, 26vw, 230px); width: auto; aspect-ratio: 886 / 774;
+  animation: driveby 8s linear infinite; will-change: transform; }
+.dashhero .bk { filter: drop-shadow(0 14px 10px rgba(0,0,0,.6)); }
+@keyframes driveby { from { transform: translateX(110%); } to { transform: translateX(calc(-100vw - 20%)); } }
+@media (max-width: 760px) { .dashhero { padding-bottom: 64px; } .dashhero .rider { height: 130px; bottom: 20px; } .dashhero .lane { height: 32px; } @keyframes driveby { from { transform: translateX(110%); } to { transform: translateX(-310%); } } }
+@media (prefers-reduced-motion: reduce) { .dashhero .rider { animation: none !important; transform: translateX(-30%); } }
