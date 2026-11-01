@@ -532,7 +532,7 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
     <form method="post" action="/super/boutique/${s.id}/supprimer" data-confirm="Supprimer ce compte${s.role === 'admin' ? ', toutes ses annonces et ses commandes' : ''} ? Cette action est définitive."><button class="btn danger sm">Supprimer</button></form>`}</div></td></tr>`;
   }).join('');
   res.locals.render({ title: 'Super administrateur', body: `<section><div class="wrap">
-  <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
+  <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn red" href="/super/compte/nouveau">+ Créer un compte</a><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
   ${storageIsPersistent() ? '' : '<div class="flash err" role="alert" style="margin:0 0 24px"><b>Stockage temporaire.</b> Le disque permanent n\'est pas encore branché : les boutiques, motos et photos seront effacées à la prochaine mise à jour du site. Ajoutez le disque Render (chemin /var/data).</div>'}
   <div class="kpis">${kpi(shops.length, 'Boutiques')}${kpi(motos.length, 'Annonces au total')}${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}</div>
   <div class="guide reveal"><b>Comment ça marche</b>
@@ -546,12 +546,7 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
   <h3 class="sec">Boutiques et leurs gérants <span class="hint">(ce sont eux qui publient les annonces)</span></h3>
   <div class="tablewrap"><table><tr><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th>Annonces</th><th>Statut</th><th></th></tr>${acctRows(shops) || '<tr><td colspan="6">Aucune boutique.</td></tr>'}</table></div>
 
-  <h3 class="sec">Créer un compte</h3>
-  <form class="stack panel" method="post" action="/super/boutique" style="margin-bottom:28px"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan"></label><label>E-mail de connexion<input type="email" name="email" required></label></div>
-  <div class="two"><label>Téléphone<input name="phone" maxlength="30"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" maxlength="30"></label></div>
-  <div class="two"><label>Type de compte<select name="role"><option value="admin">Gérant de boutique (publie des annonces)</option><option value="super">Super administrateur (voit et gère tout)</option></select></label>
-  <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label></div>
-  <button class="btn" type="submit">Créer le compte</button></form>
+  <div class="guide reveal" style="margin-top:8px"><b>Nouveau compte</b><p style="margin:10px 0 14px">Ajoutez une boutique et son gérant (il publie les annonces), ou un autre super administrateur.</p><a class="btn" href="/super/compte/nouveau">+ Créer un compte</a></div>
 
   <h3 class="sec">Super administrateurs</h3>
   <div class="tablewrap"><table><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th>Annonces</th><th>Statut</th><th></th></tr>${acctRows(admins)}</table></div>
@@ -566,11 +561,21 @@ app.get('/super/sauvegarde', requireAuth, requireSuper, (req, res) => {
   catch (e) { console.error('sauvegarde', e); flash(res, 'err', 'Sauvegarde impossible pour le moment.'); res.redirect('/super'); }
 });
 
+app.get('/super/compte/nouveau', requireAuth, requireSuper, (req, res) => {
+  res.locals.render({ title: 'Créer un compte', body: `<section><div class="wrap narrow" style="max-width:680px"><p class="crumbs"><a href="/super">Super administrateur</a><span>›</span>Créer un compte</p>
+  <h2>Créer un compte</h2><p class="sub">Une boutique et son gérant (il publie les annonces et suit les commandes), ou un autre super administrateur.</p>
+  <form class="stack panel" method="post" action="/super/boutique"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan"></label><label>E-mail de connexion<input type="email" name="email" required></label></div>
+  <div class="two"><label>Téléphone<input name="phone" maxlength="30"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" maxlength="30"></label></div>
+  <div class="two"><label>Type de compte<select name="role"><option value="admin">Gérant de boutique (publie des annonces)</option><option value="super">Super administrateur (voit et gère tout)</option></select></label>
+  <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label></div>
+  <div class="actions"><button class="btn" type="submit">Créer le compte</button><a class="btn alt" href="/super">Annuler</a></div></form></div></section>` });
+});
+
 app.post('/super/boutique', requireAuth, requireSuper, (req, res) => {
   const b = req.body; const email = String(b.email || '').trim().toLowerCase(); const shop = String(b.shop_name || '').trim().slice(0, 80);
   const role = b.role === 'super' ? 'super' : 'admin';
-  if (!shop || !EMAIL_RE.test(email) || String(b.password || '').length < 8) { flash(res, 'err', 'Vérifiez le nom, l\'e-mail et le mot de passe (8 caractères minimum).'); return res.redirect('/super'); }
-  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail.'); return res.redirect('/super'); }
+  if (!shop || !EMAIL_RE.test(email) || String(b.password || '').length < 8) { flash(res, 'err', 'Vérifiez le nom, l\'e-mail et le mot de passe (8 caractères minimum).'); return res.redirect('/super/compte/nouveau'); }
+  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail.'); return res.redirect('/super/compte/nouveau'); }
   db.prepare('INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp) VALUES (?,?,?,?,?,?)').run(email, bcrypt.hashSync(String(b.password), 10), role, shop, String(b.phone || '').slice(0, 30), String(b.whatsapp || b.phone || '').slice(0, 30));
   flash(res, 'ok', role === 'super' ? `Super administrateur « ${shop} » créé.` : `Boutique « ${shop} » créée : son gérant peut se connecter et publier.`); res.redirect('/super');
 });

@@ -575,3 +575,9 @@ fieldset.photos legend { font-weight: 700; padding: 0 8px; }
 .ph-item { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: .85rem; }
 .ph-item img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; }
 .logoprev { display: flex; align-items: center; gap: 12px; margin: 6px 0; } .logoprev img { border-radius: 50%; object-fit: cover; border: 1px solid var(--line); }
+
+/* bouton « Créer un compte » dans le menu (super administrateur) */
+nav.main > a.navcta { background: var(--red); color: #fff; border-radius: var(--r-s); padding: 0 16px; min-height: 40px; }
+nav.main > a.navcta::after { display: none; }
+nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: translateY(-1px); }
+@media (max-width: 860px) { nav.main > a.navcta { margin: 8px 0; justify-content: center; width: 100%; border-bottom: 0; } }

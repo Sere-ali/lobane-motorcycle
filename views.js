@@ -33,7 +33,7 @@ const typeIcon = (t) => `<svg viewBox="0 0 48 48" aria-hidden="true"><use href="
 
 function layout({ title, body, user, flash, desc = '', page = '', ride = false, badge = 0 }) {
   const nav = (user
-    ? `<a href="${user.role === 'super' ? '/super' : '/admin'}">Mon espace${badge ? ` <span class="navbadge" aria-label="${badge} nouveauté${badge > 1 ? 's' : ''}">${badge}</span>` : ''}</a><form method="post" action="/deconnexion" class="inline"><button type="submit">Déconnexion</button></form>`
+    ? `${user.role === 'super' ? '<a class="navcta" href="/super/compte/nouveau">+ Créer un compte</a>' : ''}<a href="${user.role === 'super' ? '/super' : '/admin'}">Mon espace${badge ? ` <span class="navbadge" aria-label="${badge} nouveauté${badge > 1 ? 's' : ''}">${badge}</span>` : ''}</a><form method="post" action="/deconnexion" class="inline"><button type="submit">Déconnexion</button></form>`
     : `<a href="/connexion">Espace boutique</a>`);
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
