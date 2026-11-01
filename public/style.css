@@ -669,3 +669,7 @@ nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: tr
 @keyframes driveby { from { transform: translateX(110%); } to { transform: translateX(calc(-100vw - 20%)); } }
 @media (max-width: 760px) { .dashhero { padding-bottom: 64px; } .dashhero .rider { height: 130px; bottom: 20px; } .dashhero .lane { height: 32px; } @keyframes driveby { from { transform: translateX(110%); } to { transform: translateX(-310%); } } }
 @media (prefers-reduced-motion: reduce) { .dashhero .rider { animation: none !important; transform: translateX(-30%); } }
+/* la moto passe DERRIÈRE les écritures et les boutons */
+.dashhero-road { z-index: 0; }
+.dashhero .rider { z-index: 0; }
+.dashhero-text { z-index: 2; }
