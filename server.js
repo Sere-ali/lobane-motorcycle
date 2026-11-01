@@ -98,7 +98,7 @@ app.use((req, res, next) => {
   req.user = u && pwStamp(u.password_hash) === tok.stamp ? u : null;
   const f = req.cookies.flash;
   if (f) { try { res.locals.flash = JSON.parse(Buffer.from(f, 'base64').toString()); } catch {} res.clearCookie('flash'); }
-  res.locals.render = (opts) => res.send(layout({ user: req.user, flash: res.locals.flash, ...opts }));
+  res.locals.render = (opts) => res.send(layout({ user: req.user, flash: res.locals.flash, ride: !/^\/(admin|super|connexion)/.test(req.path), ...opts }));
   next();
 });
 const flash = (res, type, msg) => res.cookie('flash', Buffer.from(JSON.stringify({ type, msg })).toString('base64'), { httpOnly: true, sameSite: 'lax', maxAge: 15000 });
@@ -170,7 +170,7 @@ app.get('/', (req, res) => {
     ${star ? `<span class="chip new">À la une · ${esc(star.brand || star.type)}</span><span class="chip price">${fcfa(star.price)}</span>` : '<span class="chip new">Nouveauté · Honda Winner R</span>'}
   </div>
 </div>
-  <div class="ride" aria-hidden="true"><div class="ride-bike"><img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="" loading="lazy"></div><div class="ride-road"></div></div></div>
+</div>
 <div class="stats"><div class="wrap">
   <div><strong data-count="${nm}">${nm}</strong><span>Motos en ligne</span></div>
   <div><strong data-count="${ns}">${ns}</strong><span>Boutiques partenaires</span></div>

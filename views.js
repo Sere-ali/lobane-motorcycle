@@ -26,7 +26,7 @@ const SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden=
 const TYPE_ICON = { 'Moto de ville': 'i-city', 'Tout-terrain': 'i-off', 'Sport / grosse cylindrée': 'i-sport', 'Travail / livraison': 'i-work', Scooter: 'i-scoot', 'Pièces & pneus': 'i-gear' };
 const typeIcon = (t) => `<svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${TYPE_ICON[t] || 'i-city'}"/></svg>`;
 
-function layout({ title, body, user, flash, desc = '', page = '' }) {
+function layout({ title, body, user, flash, desc = '', page = '', ride = false }) {
   const nav = (user
     ? `<a href="${user.role === 'super' ? '/super' : '/admin'}">Mon espace</a><form method="post" action="/deconnexion" class="inline"><button type="submit">Déconnexion</button></form>`
     : `<a href="/connexion">Espace boutique</a>`);
@@ -38,6 +38,7 @@ function layout({ title, body, user, flash, desc = '', page = '' }) {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@1,800;1,900&family=Barlow:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body class="${esc(page)}"><a class="skip" href="#contenu">Aller au contenu</a>${SPRITE}
+${ride ? '<div class="bgride" aria-hidden="true"><div class="ride-bike"><img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="" decoding="async"></div><div class="ride-road"></div></div>' : ''}
 <header class="site"><div class="wrap">
   <a href="/" class="brand" aria-label="Lobane Motorcycle – accueil"><img src="/img/logo-badge-96.png" width="50" height="50" alt=""><span class="brand-t"><b>Lobane</b><i>Motorcycle</i></span></a>
   <button class="navtoggle" type="button" aria-expanded="false" aria-controls="menu" aria-label="Ouvrir le menu"><span></span></button>

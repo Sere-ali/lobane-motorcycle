@@ -478,8 +478,10 @@ body { animation: fadein .5s ease both; }
 .magnet { transition: transform .25s var(--ease); will-change: transform; }
 
 /* ---------- 15. Moto qui roule (fond du héros) ---------- */
-.hero { padding-bottom: clamp(110px, 17vw, 190px); }
-.ride { position: absolute; left: 0; right: 0; bottom: 0; z-index: -1; height: clamp(96px, 15vw, 170px); overflow: hidden; pointer-events: none; }
+.bgride { position: fixed; left: 0; right: 0; bottom: 0; z-index: -1; height: clamp(90px, 16vw, 170px); overflow: hidden; pointer-events: none; }
+/* le fond laisse apparaître la moto qui roule derrière le contenu */
+.alt-bg { background: color-mix(in srgb, var(--surface) 58%, transparent); }
+.hero { background: linear-gradient(160deg, color-mix(in srgb, var(--surface) 80%, transparent) 0%, transparent 70%); }
 .ride-bike { position: absolute; bottom: 10px; left: 0; height: calc(100% - 10px); aspect-ratio: 1.2 / 1; animation: ride 9s linear infinite; will-change: transform; }
 .ride-bike img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; filter: brightness(1.07) contrast(1.12); -webkit-mask-image: radial-gradient(ellipse 62% 66% at 50% 62%, #000 60%, transparent 100%); mask-image: radial-gradient(ellipse 62% 66% at 50% 62%, #000 60%, transparent 100%); animation: bounce .45s ease-in-out infinite alternate; transform-origin: 50% 90%; }
 /* traînées de vitesse derrière la moto (elle roule vers la gauche : l'arrière est à droite) */
