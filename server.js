@@ -269,7 +269,7 @@ app.post('/moto/:id(\\d+)/demande', (req, res) => {
 // ================= AUTHENTIFICATION =================
 app.get('/connexion', (req, res) => {
   if (req.user) return res.redirect(req.user.role === 'super' ? '/super' : '/admin');
-  res.locals.render({ title: 'Connexion – Espace boutique', body: `<section><div class="wrap narrow"><h2>Espace boutique</h2><p class="sub">Connectez-vous pour gérer vos motos.</p>
+  res.locals.render({ title: 'Connexion – Espace boutique', body: `<section><div class="wrap narrow"><h2 class="reveal">Espace boutique</h2><p class="sub reveal">Gérants de boutique : connectez-vous pour publier et gérer vos annonces de motos.</p>
   <form class="stack panel" method="post" action="/connexion"><label>E-mail<input type="email" name="email" required autocomplete="username"></label>
   <label>Mot de passe<input type="password" name="password" required autocomplete="current-password"></label><button class="btn" type="submit">Se connecter</button></form></div></section>` });
 });
@@ -293,8 +293,8 @@ app.get('/admin', requireAuth, (req, res) => {
   const motos = db.prepare('SELECT * FROM motos WHERE user_id=? ORDER BY id DESC').all(req.user.id);
   const inq = db.prepare('SELECT i.*, m.title FROM inquiries i LEFT JOIN motos m ON m.id=i.moto_id WHERE i.shop_id=? ORDER BY i.id DESC LIMIT 20').all(req.user.id);
   res.locals.render({ title: 'Mon espace boutique', body: `<section><div class="wrap">
-  <div class="dash-head"><div><h2>${esc(req.user.shop_name)}</h2></div><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
-  <div class="kpis"><div class="kpi"><strong>${motos.length}</strong><span>Motos publiées</span></div><div class="kpi"><strong>${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi"><strong>${motos.filter((m) => m.status === 'vendu').length}</strong><span>Vendues</span></div><div class="kpi"><strong>${inq.length}</strong><span>Demandes reçues</span></div></div>
+  <div class="dash-head"><div><span class="tag">Espace gérant</span><h2 style="margin-top:12px">${esc(req.user.shop_name)}</h2><p class="sub" style="margin:10px 0 0">C'est vous qui publiez les annonces de votre boutique. Elles apparaissent sur le site avec le nom de votre boutique.</p></div><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Publier une annonce</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
+  <div class="kpis"><div class="kpi reveal"><strong data-count="${motos.length}">${motos.length}</strong><span>Annonces publiées</span></div><div class="kpi reveal"><strong data-count="${motos.filter((m) => m.status === 'disponible').length}">${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi reveal"><strong data-count="${motos.filter((m) => m.status === 'vendu').length}">${motos.filter((m) => m.status === 'vendu').length}</strong><span>Vendues</span></div><div class="kpi reveal"><strong data-count="${inq.length}">${inq.length}</strong><span>Demandes reçues</span></div></div>
   <h3 class="sec">Mes motos</h3>
   ${motos.length ? `<div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a></td><td>${esc(m.type)}</td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
   <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('')}</table></div>` : '<div class="empty" style="margin-bottom:28px">Vous n\'avez pas encore publié de moto.</div>'}
@@ -366,19 +366,24 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
   res.locals.render({ title: 'Super administrateur', body: `<section><div class="wrap">
   <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
   ${storageIsPersistent() ? '' : '<div class="flash err" role="alert" style="margin:0 0 24px"><b>Stockage temporaire.</b> Le disque permanent n\'est pas encore branché : les boutiques, motos et photos seront effacées à la prochaine mise à jour du site. Ajoutez le disque Render (chemin /var/data).</div>'}
-  <div class="kpis"><div class="kpi"><strong>${shops.length}</strong><span>Boutiques</span></div><div class="kpi"><strong>${motos.length}</strong><span>Motos au total</span></div><div class="kpi"><strong>${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi"><strong>${inq.length}</strong><span>Demandes récentes</span></div></div>
+  <div class="kpis"><div class="kpi reveal"><strong data-count="${shops.length}">${shops.length}</strong><span>Boutiques</span></div><div class="kpi reveal"><strong data-count="${motos.length}">${motos.length}</strong><span>Annonces au total</span></div><div class="kpi reveal"><strong data-count="${motos.filter((m) => m.status === 'disponible').length}">${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi reveal"><strong data-count="${inq.length}">${inq.length}</strong><span>Demandes récentes</span></div></div>
 
-  <h3 class="sec">Boutiques (comptes administrateurs)</h3>
+  <div class="guide reveal"><b>Comment ça marche</b>
+    <ol><li><span>Vous créez le compte d'une boutique (ci-dessous) : nom, e-mail et mot de passe du gérant.</span></li>
+    <li><span>Le gérant se connecte sur <i>Espace boutique</i> et publie lui-même ses annonces (prix, photo, nom de la boutique).</span></li>
+    <li><span>Vous voyez tout ici : boutiques, annonces, demandes des clients. Vous pouvez modifier, suspendre ou supprimer.</span></li></ol></div>
+
+  <h3 class="sec">Boutiques et leurs gérants <span class="hint">(ce sont eux qui publient les annonces)</span></h3>
   <div class="tablewrap"><table><tr><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th>Motos</th><th>Statut</th><th></th></tr>
   ${shops.map((s) => `<tr><td><b>${esc(s.shop_name)}</b></td><td>${esc(s.email)}</td><td>${esc(s.phone || '')}</td><td>${s.nb}</td><td><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'Actif' : 'Suspendu'}</span></td>
   <td><div class="actions"><form method="post" action="/super/boutique/${s.id}/${s.active ? 'suspendre' : 'activer'}"><button class="btn alt sm">${s.active ? 'Suspendre' : 'Réactiver'}</button></form>
   <form method="post" action="/super/boutique/${s.id}/mdp" data-prompt-password="Nouveau mot de passe (8 caractères min.) :"><input type="hidden" name="password"><button class="btn alt sm">Mot de passe</button></form>
   <form method="post" action="/super/boutique/${s.id}/supprimer" data-confirm="Supprimer cette boutique et toutes ses motos ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="6">Aucune boutique.</td></tr>'}</table></div>
 
-  <h3 class="sec">Créer un compte boutique</h3>
-  <form class="stack panel" method="post" action="/super/boutique" style="margin-bottom:28px"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80"></label><label>E-mail de connexion<input type="email" name="email" required></label></div>
+  <h3 class="sec">Créer une boutique et son gérant <span class="hint">(le gérant pourra publier des annonces)</span></h3>
+  <form class="stack panel" method="post" action="/super/boutique" style="margin-bottom:28px"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan"></label><label>E-mail du gérant (pour se connecter)<input type="email" name="email" required></label></div>
   <div class="two"><label>Téléphone<input name="phone" maxlength="30"></label><label>WhatsApp<input name="whatsapp" maxlength="30"></label></div>
-  <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label><button class="btn" type="submit">Créer la boutique</button></form>
+  <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label><button class="btn" type="submit">Créer la boutique et le gérant</button></form>
 
   <h3 class="sec">Toutes les motos <span class="hint">(valeur totale du catalogue : ${fcfa(total)})</span></h3>
   <div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Boutique</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>
