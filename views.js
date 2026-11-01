@@ -1,4 +1,9 @@
 const { TYPES } = require('./db');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+// Version des fichiers CSS/JS : change à chaque modification, ce qui force les navigateurs à recharger (plus de page cassée par un ancien cache)
+const ASSET_V = crypto.createHash('sha1').update(['style.css', 'app.js'].map((f) => fs.readFileSync(path.join(__dirname, 'public', f))).join('|')).digest('hex').slice(0, 10);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fcfa = (n) => new Intl.NumberFormat('fr-FR').format(n).replace(/ | /g, ' ') + ' F CFA';
@@ -36,7 +41,8 @@ function layout({ title, body, user, flash, desc = '', page = '', ride = false }
 <meta name="theme-color" content="#1f6b12"><link rel="icon" type="image/png" href="/img/logo-badge-96.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@1,800;1,900&family=Barlow:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<style>.bgride{position:fixed;left:0;right:0;bottom:0;height:150px;overflow:hidden;z-index:-1;pointer-events:none}.bgride .ride-bike{position:absolute;bottom:14px;left:0;height:130px;width:156px}.bgride img{width:100%;height:100%;object-fit:contain}</style>
+<link rel="stylesheet" href="/style.css?v=${ASSET_V}"><script src="/app.js?v=${ASSET_V}" defer></script></head>
 <body class="${esc(page)}"><a class="skip" href="#contenu">Aller au contenu</a>${SPRITE}
 ${ride ? '<div class="bgride" aria-hidden="true"><div class="ride-bike"><img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="" decoding="async"></div><div class="ride-road"></div></div>' : ''}
 <header class="site"><div class="wrap">

@@ -521,3 +521,18 @@ body { animation: fadein .5s ease both; }
   .hero .cta .btn { flex: 1 1 100%; }
 }
 @media (max-height: 520px) and (orientation: landscape) { .hero { min-height: 0; padding-bottom: 150px; } .bgride { height: 130px; } }
+
+/* ---------- 17. Goudron : la moto roule sur une vraie route ---------- */
+.bgride { --road: clamp(20px, 3.4vw, 34px); }
+.bgride .ride-bike { bottom: calc(var(--road) - 7px); height: calc(100% - var(--road) + 7px); width: auto; }
+.bgride .ride-road {
+  left: 0; right: 0; bottom: 0; height: var(--road);
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255,255,255,.10) 0 1px, transparent 1.5px) 0 0 / 9px 9px,
+    radial-gradient(circle at 70% 70%, rgba(255,255,255,.07) 0 1px, transparent 1.5px) 0 0 / 7px 7px,
+    linear-gradient(#3a3d3a, #232523);
+  border-top: 3px solid #f2f2f2; box-shadow: 0 -2px 0 #9a9d9a;
+}
+.bgride .ride-road::after { top: 50%; margin-top: -1.5px; height: 3px; background: repeating-linear-gradient(90deg, #ffd84a 0 38px, transparent 38px 84px); animation: road 0.9s linear infinite; }
+@keyframes road { to { background-position: 84px 0; } }
+.bgride .ride-bike img { filter: brightness(1.07) contrast(1.12) drop-shadow(0 6px 4px rgba(0,0,0,.25)); }

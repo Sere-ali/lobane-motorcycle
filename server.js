@@ -80,7 +80,7 @@ app.use((req, res, next) => {
 app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /admin\nDisallow: /super\nDisallow: /connexion\n'));
 app.use(express.urlencoded({ extended: false, limit: '50kb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', setHeaders: (r, f) => { if (/\.(css|js)$/.test(f)) r.setHeader('Cache-Control', 'no-cache'); } }));
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true, setHeaders: (r) => r.setHeader('Content-Disposition', 'inline') }));
 
 // protection CSRF : l'origine doit correspondre à l'hôte
@@ -98,7 +98,7 @@ app.use((req, res, next) => {
   req.user = u && pwStamp(u.password_hash) === tok.stamp ? u : null;
   const f = req.cookies.flash;
   if (f) { try { res.locals.flash = JSON.parse(Buffer.from(f, 'base64').toString()); } catch {} res.clearCookie('flash'); }
-  res.locals.render = (opts) => res.send(layout({ user: req.user, flash: res.locals.flash, ride: !/^\/(admin|super|connexion)/.test(req.path), ...opts }));
+  res.locals.render = (opts) => res.set('Cache-Control', 'no-cache').send(layout({ user: req.user, flash: res.locals.flash, ride: !/^\/(admin|super|connexion)/.test(req.path), ...opts }));
   next();
 });
 const flash = (res, type, msg) => res.cookie('flash', Buffer.from(JSON.stringify({ type, msg })).toString('base64'), { httpOnly: true, sameSite: 'lax', maxAge: 15000 });
