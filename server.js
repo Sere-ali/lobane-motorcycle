@@ -80,8 +80,39 @@ app.use((req, res, next) => {
 app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /admin\nDisallow: /super\nDisallow: /connexion\n'));
 app.use(express.urlencoded({ extended: false, limit: '50kb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', setHeaders: (r, f) => { if (/\.(css|js)$/.test(f)) r.setHeader('Cache-Control', 'no-cache'); } }));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '7d', setHeaders: (r, f) => { if (/\.(css|js)$/.test(f)) r.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } })); // css/js : URL versionnée (?v=hash)
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true, setHeaders: (r) => r.setHeader('Content-Disposition', 'inline') }));
+
+// Miniatures (560 px) générées à la demande puis servies depuis le disque : les listes de motos chargent vite.
+const THUMB_DIR = path.join(DATA_DIR, 'thumbs'); fs.mkdirSync(THUMB_DIR, { recursive: true });
+const thumbBusy = new Map();
+app.get('/t/:name', async (req, res) => {
+  const name = req.params.name;
+  if (!/^[\w.-]{1,80}\.(webp|jpg|jpeg|png)$/i.test(name)) return res.sendStatus(404);
+  const out = path.join(THUMB_DIR, name.replace(/\.\w+$/, '') + '.webp'); const src = path.join(UPLOAD_DIR, name);
+  const send = () => res.set({ 'Cache-Control': 'public, max-age=2592000, immutable', 'Content-Type': 'image/webp' }).sendFile(out);
+  if (fs.existsSync(out)) return send();
+  if (!fs.existsSync(src)) return res.redirect(302, `/uploads/${encodeURIComponent(name)}`);
+  try {
+    if (!thumbBusy.has(out)) thumbBusy.set(out, sharp(src).resize({ width: 560, withoutEnlargement: true }).webp({ quality: 72 }).toFile(out + '.tmp').then(() => fs.renameSync(out + '.tmp', out)).finally(() => thumbBusy.delete(out)));
+    await thumbBusy.get(out); send();
+  } catch (e) { res.redirect(302, `/uploads/${encodeURIComponent(name)}`); }
+});
+
+// Micro-cache des pages publiques (visiteurs sans compte) : 20 s, vidé à chaque changement (annonce, commande, compte…).
+const pageCache = new Map(); const PAGE_TTL = 20e3;
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') { pageCache.clear(); res.on('finish', () => pageCache.clear()); return next(); }
+  if (req.headers.cookie || !/^\/(motos|moto\/\d+)?$/.test(req.path)) return next();
+  const key = req.originalUrl; const hit = pageCache.get(key);
+  if (hit && hit.exp > Date.now()) { res.set(hit.headers); return res.status(hit.status).send(hit.body); }
+  const send = res.send.bind(res);
+  res.send = (body) => {
+    if (res.statusCode === 200 && typeof body === 'string' && pageCache.size < 300) pageCache.set(key, { exp: Date.now() + PAGE_TTL, status: 200, body, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
+    return send(body);
+  };
+  next();
+});
 
 // protection CSRF : l'origine doit correspondre à l'hôte
 app.use((req, res, next) => {
@@ -366,7 +397,7 @@ app.get('/inscription', (req, res) => {
     <p class="hint">Déjà un compte ? <a href="/connexion"><b>Se connecter</b></a></p>
   </form></div></section>` });
 });
-app.post('/inscription', (req, res) => {
+app.post('/inscription', async (req, res) => {
   if (req.user) return res.redirect(homeOf(req.user));
   const b = req.body;
   if (String(b.website || '') !== '') return res.redirect('/inscription'); // champ piège : un robot l'a rempli
@@ -379,7 +410,7 @@ app.post('/inscription', (req, res) => {
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail. Connectez-vous ou utilisez un autre e-mail.'); return res.redirect('/inscription'); }
   if (db.prepare("SELECT COUNT(*) c FROM users WHERE status='pending'").get().c >= 100) { flash(res, 'err', 'Trop de demandes en attente pour le moment. Réessayez plus tard.'); return res.redirect('/inscription'); }
   db.prepare("INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp,status) VALUES (?,?,'admin',?,?,?,'pending')")
-    .run(email, bcrypt.hashSync(pw, 10), shop, phone, String(b.whatsapp || phone).trim().slice(0, 30));
+    .run(email, await bcrypt.hash(pw, 10), shop, phone, String(b.whatsapp || phone).trim().slice(0, 30));
   res.locals.render({ title: 'Demande envoyée – Lobane Motorcycle', body: `<section><div class="wrap narrow" style="max-width:640px;text-align:center"><div class="okmark" aria-hidden="true">✓</div><h2 style="display:inline-block">Demande envoyée</h2>
   <p class="sub" style="margin-inline:auto">Merci ! Le compte de <b>${esc(shop)}</b> est en attente de validation par le super administrateur de Lobane Motorcycle. Dès qu'il est validé, connectez-vous avec <b>${esc(email)}</b> pour publier vos annonces.</p>
   <div class="cta" style="justify-content:center;margin-top:14px"><a class="btn" href="/">Retour à l'accueil</a><a class="btn alt" href="/connexion">Se connecter</a></div></div></section>` });
@@ -392,11 +423,11 @@ app.get('/connexion', (req, res) => {
   <form class="stack panel" method="post" action="/connexion"><label>E-mail<input type="email" name="email" required autocomplete="username"></label>
   <label>Mot de passe<input type="password" name="password" required autocomplete="current-password"></label><button class="btn" type="submit">Se connecter</button></form></div></section>` });
 });
-app.post('/connexion', (req, res) => {
+app.post('/connexion', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   if (limited(`login:${req.ip}`, 10, 15 * 60e3) || limited(`loginu:${email}`, 8, 15 * 60e3)) { flash(res, 'err', 'Trop de tentatives. Réessayez dans 15 minutes.'); return res.redirect('/connexion'); }
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
-  const ok = bcrypt.compareSync(String(req.body.password || ''), u ? u.password_hash : DUMMY_HASH) && !!u;
+  const ok = (await bcrypt.compare(String(req.body.password || ''), u ? u.password_hash : DUMMY_HASH)) && !!u;
   if (!ok) { flash(res, 'err', 'E-mail ou mot de passe incorrect.'); return res.redirect('/connexion'); }
   if (u.status === 'pending') { flash(res, 'err', 'Votre compte est en attente de validation par le super administrateur. Vous pourrez vous connecter dès qu\'il sera validé.'); return res.redirect('/connexion'); }
   if (!u.active) { flash(res, 'err', 'Ce compte est suspendu. Contactez Lobane Motorcycle.'); return res.redirect('/connexion'); }

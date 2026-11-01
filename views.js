@@ -11,7 +11,7 @@ const digits = (s) => String(s || '').replace(/\D/g, '');
 
 // Sans photo : le logo de la marque (pas de dessin). Avec photo : image en fondu à l'affichage.
 const placeholder = () => `<div class="ph"><img src="/img/logo-badge-96.png" width="96" height="96" alt="" loading="lazy"><span>Photo bientôt disponible</span></div>`;
-const motoImg = (m, eager = false) => (m.image ? `<img class="fade" src="/uploads/${esc(m.image)}" alt="${esc(m.title)}" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">` : placeholder());
+const motoImg = (m, eager = false) => (m.image ? `<img class="fade" src="${eager ? '/uploads/' : '/t/'}${esc(m.image)}" alt="${esc(m.title)}" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">` : placeholder());
 
 const SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <g id="moto"><circle cx="90" cy="150" r="46" fill="none" stroke="#111" stroke-width="10"/><circle cx="90" cy="150" r="14" fill="#111"/>
