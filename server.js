@@ -7,7 +7,7 @@ const compression = require('compression');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { db, seed, TYPES, DATA_DIR } = require('./db');
+const { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent } = require('./db');
 const V = require('./views');
 const { esc, fcfa, digits, layout, motoCard, filterForm, motoForm, motoImg, typeIcon } = V;
 
@@ -23,20 +23,23 @@ if (!SECRET) {
   SECRET = fs.readFileSync(f, 'utf8');
 }
 const sign = (v) => crypto.createHmac('sha256', SECRET).update(v).digest('hex');
-const makeToken = (uid) => {
+// Empreinte du mot de passe dans le jeton : changer de mot de passe déconnecte toutes les anciennes sessions.
+const pwStamp = (hash) => crypto.createHash('sha256').update(String(hash)).digest('hex').slice(0, 12);
+const makeToken = (u) => {
   const exp = Date.now() + 1000 * 60 * 60 * 8; // 8 h
-  const p = `${uid}.${exp}`;
+  const p = `${u.id}.${exp}.${pwStamp(u.password_hash)}`;
   return `${p}.${sign(p)}`;
 };
 function readToken(t) {
   if (!t) return null;
-  const [uid, exp, sig] = String(t).split('.');
-  if (!uid || !exp || !sig) return null;
-  const expect = sign(`${uid}.${exp}`);
+  const [uid, exp, stamp, sig] = String(t).split('.');
+  if (!uid || !exp || !stamp || !sig) return null;
+  const expect = sign(`${uid}.${exp}.${stamp}`);
   if (sig.length !== expect.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expect))) return null;
   if (Number(exp) < Date.now()) return null;
-  return Number(uid);
+  return { uid: Number(uid), stamp };
 }
+const DUMMY_HASH = bcrypt.hashSync('lobane-dummy', 10); // temps de réponse constant si l'e-mail est inconnu
 
 // ---- limitation simple de débit ----
 const hits = new Map();
@@ -56,13 +59,25 @@ app.use(compression());
 app.get('/healthz', (req, res) => {
   try { db.prepare('SELECT 1').get(); res.type('text/plain').send('ok'); } catch (e) { res.status(500).type('text/plain').send('db'); }
 });
+// journal des requêtes (pages et actions, pas les fichiers statiques)
+app.use((req, res, next) => {
+  if (/\.(css|js|png|jpe?g|webp|ico|svg|woff2?)$/i.test(req.path) || req.path.startsWith('/uploads/')) return next();
+  const t = Date.now();
+  res.on('finish', () => console.log(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - t}ms`));
+  next();
+});
 app.use((req, res, next) => {
   if (PROD) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'");
+  if (req.method === 'GET' && /^\/(admin|super|connexion)/.test(req.path)) res.setHeader('Cache-Control', 'no-store');
   next();
 });
+app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /admin\nDisallow: /super\nDisallow: /connexion\n'));
 app.use(express.urlencoded({ extended: false, limit: '50kb' }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
@@ -78,8 +93,9 @@ app.use((req, res, next) => {
 
 // utilisateur courant + messages flash
 app.use((req, res, next) => {
-  const uid = readToken(req.cookies.sid);
-  req.user = uid ? db.prepare('SELECT * FROM users WHERE id=? AND active=1').get(uid) || null : null;
+  const tok = readToken(req.cookies.sid);
+  const u = tok ? db.prepare('SELECT * FROM users WHERE id=? AND active=1').get(tok.uid) : null;
+  req.user = u && pwStamp(u.password_hash) === tok.stamp ? u : null;
   const f = req.cookies.flash;
   if (f) { try { res.locals.flash = JSON.parse(Buffer.from(f, 'base64').toString()); } catch {} res.clearCookie('flash'); }
   res.locals.render = (opts) => res.send(layout({ user: req.user, flash: res.locals.flash, ...opts }));
@@ -150,8 +166,8 @@ app.get('/', (req, res) => {
     <div class="cta"><a class="btn" href="/motos">Voir toutes les motos <span class="arr">→</span></a><a class="btn alt" href="tel:+2250505137178">📞 05 05 13 71 78</a></div>
   </div>
   <div class="heroart">
-    <a class="heroart-card" href="${star ? '/moto/' + star.id : '/motos'}" aria-label="${star ? esc(star.title) : 'Voir les motos'}">${star ? motoImg(star) : '<div class="ph" style="color:#e11d27;background:#fde7e9"><svg viewBox="0 0 400 220" aria-hidden="true"><use href="#moto"/></svg></div>'}</a>
-    ${star ? `<span class="chip new">À la une · ${esc(star.brand || star.type)}</span><span class="chip price">${fcfa(star.price)}</span>` : ''}
+    <a class="heroart-card" href="${star ? '/moto/' + star.id : '/motos'}" aria-label="${star ? esc(star.title) : 'Voir les motos'}">${star ? motoImg(star, true) : '<img src="/img/demo/honda-winner-r-2026.jpg" width="1200" height="1000" alt="Honda Winner R 2026" fetchpriority="high">'}</a>
+    ${star ? `<span class="chip new">À la une · ${esc(star.brand || star.type)}</span><span class="chip price">${fcfa(star.price)}</span>` : '<span class="chip new">Nouveauté · Honda Winner R</span>'}
   </div>
 </div></div>
 <div class="stats"><div class="wrap">
@@ -261,10 +277,10 @@ app.post('/connexion', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   if (limited(`login:${req.ip}`, 10, 15 * 60e3) || limited(`loginu:${email}`, 8, 15 * 60e3)) { flash(res, 'err', 'Trop de tentatives. Réessayez dans 15 minutes.'); return res.redirect('/connexion'); }
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
-  const ok = u && bcrypt.compareSync(String(req.body.password || ''), u.password_hash);
+  const ok = bcrypt.compareSync(String(req.body.password || ''), u ? u.password_hash : DUMMY_HASH) && !!u;
   if (!ok) { flash(res, 'err', 'E-mail ou mot de passe incorrect.'); return res.redirect('/connexion'); }
   if (!u.active) { flash(res, 'err', 'Ce compte est suspendu. Contactez Lobane Motorcycle.'); return res.redirect('/connexion'); }
-  res.cookie('sid', makeToken(u.id), { httpOnly: true, sameSite: 'lax', secure: PROD, maxAge: 8 * 3600e3 });
+  res.cookie('sid', makeToken(u), { httpOnly: true, sameSite: 'lax', secure: PROD, maxAge: 8 * 3600e3 });
   res.redirect(u.role === 'super' ? '/super' : '/admin');
 });
 app.post('/deconnexion', (req, res) => { res.clearCookie('sid'); res.redirect('/'); });
@@ -281,7 +297,7 @@ app.get('/admin', requireAuth, (req, res) => {
   <div class="kpis"><div class="kpi"><strong>${motos.length}</strong><span>Motos publiées</span></div><div class="kpi"><strong>${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi"><strong>${motos.filter((m) => m.status === 'vendu').length}</strong><span>Vendues</span></div><div class="kpi"><strong>${inq.length}</strong><span>Demandes reçues</span></div></div>
   <h3 class="sec">Mes motos</h3>
   ${motos.length ? `<div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a></td><td>${esc(m.type)}</td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
-  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" onsubmit="return confirm('Supprimer cette moto ?')"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('')}</table></div>` : '<div class="empty" style="margin-bottom:28px">Vous n\'avez pas encore publié de moto.</div>'}
+  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('')}</table></div>` : '<div class="empty" style="margin-bottom:28px">Vous n\'avez pas encore publié de moto.</div>'}
   <h3 class="sec">Dernières demandes</h3>
   ${inq.length ? `<div class="tablewrap"><table><tr><th>Date</th><th>Nom</th><th>Téléphone</th><th>Moto</th><th>Message</th></tr>${inq.map((i) => `<tr><td>${esc(i.created_at.slice(0, 16))}</td><td>${esc(i.name)}</td><td><a href="tel:${esc(i.phone)}">${esc(i.phone)}</a></td><td>${esc(i.title || '—')}</td><td>${esc(i.message || '')}</td></tr>`).join('')}</table></div>` : '<div class="empty">Aucune demande pour le moment.</div>'}
   </div></section>` });
@@ -333,7 +349,11 @@ app.post('/admin/profil', requireAuth, (req, res) => {
   const pw = String(req.body.password || '');
   if (pw && pw.length < 8) { flash(res, 'err', 'Mot de passe trop court (8 caractères minimum).'); return res.redirect('/admin/profil'); }
   db.prepare('UPDATE users SET phone=?, whatsapp=? WHERE id=?').run(String(req.body.phone || '').slice(0, 30), String(req.body.whatsapp || '').slice(0, 30), req.user.id);
-  if (pw) db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), req.user.id);
+  if (pw) {
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), req.user.id);
+    // les anciennes sessions (autres appareils) sont invalidées ; celle-ci est renouvelée
+    res.cookie('sid', makeToken(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)), { httpOnly: true, sameSite: 'lax', secure: PROD, maxAge: 8 * 3600e3 });
+  }
   flash(res, 'ok', 'Profil mis à jour.'); res.redirect(req.user.role === 'super' ? '/super' : '/admin');
 });
 
@@ -344,15 +364,16 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
   const inq = db.prepare('SELECT i.*, m.title, u.shop_name FROM inquiries i LEFT JOIN motos m ON m.id=i.moto_id LEFT JOIN users u ON u.id=i.shop_id ORDER BY i.id DESC LIMIT 30').all();
   const total = motos.reduce((s, m) => s + m.price, 0);
   res.locals.render({ title: 'Super administrateur', body: `<section><div class="wrap">
-  <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
+  <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
+  ${storageIsPersistent() ? '' : '<div class="flash err" role="alert" style="margin:0 0 24px"><b>Stockage temporaire.</b> Le disque permanent n\'est pas encore branché : les boutiques, motos et photos seront effacées à la prochaine mise à jour du site. Ajoutez le disque Render (chemin /var/data).</div>'}
   <div class="kpis"><div class="kpi"><strong>${shops.length}</strong><span>Boutiques</span></div><div class="kpi"><strong>${motos.length}</strong><span>Motos au total</span></div><div class="kpi"><strong>${motos.filter((m) => m.status === 'disponible').length}</strong><span>Disponibles</span></div><div class="kpi"><strong>${inq.length}</strong><span>Demandes récentes</span></div></div>
 
   <h3 class="sec">Boutiques (comptes administrateurs)</h3>
   <div class="tablewrap"><table><tr><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th>Motos</th><th>Statut</th><th></th></tr>
   ${shops.map((s) => `<tr><td><b>${esc(s.shop_name)}</b></td><td>${esc(s.email)}</td><td>${esc(s.phone || '')}</td><td>${s.nb}</td><td><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'Actif' : 'Suspendu'}</span></td>
   <td><div class="actions"><form method="post" action="/super/boutique/${s.id}/${s.active ? 'suspendre' : 'activer'}"><button class="btn alt sm">${s.active ? 'Suspendre' : 'Réactiver'}</button></form>
-  <form method="post" action="/super/boutique/${s.id}/mdp" onsubmit="var p=prompt('Nouveau mot de passe (8 caractères min.) :');if(!p||p.length<8)return false;this.password.value=p;return true"><input type="hidden" name="password"><button class="btn alt sm">Mot de passe</button></form>
-  <form method="post" action="/super/boutique/${s.id}/supprimer" onsubmit="return confirm('Supprimer cette boutique et toutes ses motos ?')"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="6">Aucune boutique.</td></tr>'}</table></div>
+  <form method="post" action="/super/boutique/${s.id}/mdp" data-prompt-password="Nouveau mot de passe (8 caractères min.) :"><input type="hidden" name="password"><button class="btn alt sm">Mot de passe</button></form>
+  <form method="post" action="/super/boutique/${s.id}/supprimer" data-confirm="Supprimer cette boutique et toutes ses motos ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="6">Aucune boutique.</td></tr>'}</table></div>
 
   <h3 class="sec">Créer un compte boutique</h3>
   <form class="stack panel" method="post" action="/super/boutique" style="margin-bottom:28px"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80"></label><label>E-mail de connexion<input type="email" name="email" required></label></div>
@@ -362,11 +383,16 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
   <h3 class="sec">Toutes les motos <span class="hint">(valeur totale du catalogue : ${fcfa(total)})</span></h3>
   <div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Boutique</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>
   ${motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a></td><td>${esc(m.shop_name)}${m.active ? '' : ' <span class="pill off">suspendue</span>'}</td><td>${esc(m.type)}</td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
-  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" onsubmit="return confirm('Supprimer cette moto ?')"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="7">Aucune moto.</td></tr>'}</table></div>
+  <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('') || '<tr><td colspan="7">Aucune moto.</td></tr>'}</table></div>
 
   <h3 class="sec">Demandes récentes (toutes boutiques)</h3>
   ${inq.length ? `<div class="tablewrap"><table><tr><th>Date</th><th>Nom</th><th>Téléphone</th><th>Boutique</th><th>Moto / sujet</th><th>Message</th></tr>${inq.map((i) => `<tr><td>${esc(i.created_at.slice(0, 16))}</td><td>${esc(i.name)}</td><td><a href="tel:${esc(i.phone)}">${esc(i.phone)}</a></td><td>${esc(i.shop_name || '—')}</td><td>${esc(i.title || i.subject || '—')}</td><td>${esc(i.message || '')}</td></tr>`).join('')}</table></div>` : '<div class="empty">Aucune demande.</div>'}
   </div></section>` });
+});
+
+app.get('/super/sauvegarde', requireAuth, requireSuper, (req, res) => {
+  try { res.download(backup(), `lobane-sauvegarde-${new Date().toISOString().slice(0, 10)}.db`); }
+  catch (e) { console.error('sauvegarde', e); flash(res, 'err', 'Sauvegarde impossible pour le moment.'); res.redirect('/super'); }
 });
 
 app.post('/super/boutique', requireAuth, requireSuper, (req, res) => {
@@ -399,11 +425,18 @@ app.use((err, req, res, next) => { console.error(err); res.status(500).send(layo
 
 const created = seed();
 const PORT = process.env.PORT || 3000;
+// sauvegarde quotidienne de la base (au démarrage puis toutes les 24 h)
+const runBackup = () => { try { backup(); } catch (e) { console.error('sauvegarde automatique échouée', e.message); } };
+setTimeout(runBackup, 15e3).unref(); setInterval(runBackup, 24 * 3600e3).unref();
+process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
+process.on('uncaughtException', (e) => { console.error('uncaughtException', e); process.exit(1); });
 const server = app.listen(PORT, () => {
   console.log(`Lobane Motorcycle sur http://localhost:${PORT} (${PROD ? 'production' : 'développement'})`);
+  if (PROD && !storageIsPersistent()) console.warn('ATTENTION : stockage non permanent. Branchez un disque Render sur /var/data et définissez DATA_DIR=/var/data.');
   if (created) console.log(created.generated
     ? `Compte super admin créé : ${created.email} / mot de passe généré : ${created.password}  (notez-le puis changez-le dans « Mon profil »)`
     : `Compte super admin créé : ${created.email}` + (PROD ? '' : ` / ${created.password}  (changez ce mot de passe !)`));
 });
+server.keepAliveTimeout = 65e3; server.headersTimeout = 66e3; // plus longs que le délai du proxy Render
 const shutdown = () => { server.close(() => { try { db.close(); } catch (e) {} process.exit(0); }); setTimeout(() => process.exit(0), 8000).unref(); };
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

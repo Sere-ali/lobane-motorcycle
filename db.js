@@ -11,6 +11,8 @@ const db = new DatabaseSync(path.join(DATA_DIR, 'lobane.db'));
 db.exec(`
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+PRAGMA synchronous = NORMAL;
 
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +50,26 @@ CREATE TABLE IF NOT EXISTS inquiries (
 );
 CREATE INDEX IF NOT EXISTS idx_motos_user ON motos(user_id);
 CREATE INDEX IF NOT EXISTS idx_motos_type ON motos(type);
+CREATE INDEX IF NOT EXISTS idx_motos_status ON motos(status);
+CREATE INDEX IF NOT EXISTS idx_inq_shop ON inquiries(shop_id, id);
 `);
+
+// Sauvegarde cohérente de la base (VACUUM INTO) : une copie par jour, on garde les 7 dernières.
+function backup(keep = 7) {
+  const dir = path.join(DATA_DIR, 'backups');
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, `lobane-${new Date().toISOString().slice(0, 10)}.db`);
+  fs.rmSync(f, { force: true });
+  db.exec(`VACUUM INTO '${f.replace(/'/g, "''")}'`);
+  fs.readdirSync(dir).filter((n) => /^lobane-\d{4}-\d{2}-\d{2}\.db$/.test(n)).sort().slice(0, -keep)
+    .forEach((n) => fs.rmSync(path.join(dir, n), { force: true }));
+  return f;
+}
+
+// Le stockage est-il durable ? Faux si DATA_DIR est sur le même disque que le système (disque Render absent).
+function storageIsPersistent() {
+  try { return fs.statSync(DATA_DIR).dev !== fs.statSync('/').dev; } catch { return true; }
+}
 
 const TYPES = ['Moto de ville', 'Tout-terrain', 'Sport / grosse cylindrée', 'Travail / livraison', 'Scooter', 'Pièces & pneus'];
 
@@ -82,4 +103,4 @@ function seed() {
   return { email, password, generated };
 }
 
-module.exports = { db, seed, TYPES, DATA_DIR };
+module.exports = { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent };

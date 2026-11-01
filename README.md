@@ -50,3 +50,11 @@ Au premier démarrage, le compte super admin et deux boutiques de démonstration
 - Render fait des sauvegardes automatiques du disque ; pour une copie à soi, télécharger `lobane.db` et le dossier `uploads` depuis le disque (SSH Render ou Shell du service).
 - Les photos envoyées sont automatiquement redimensionnées (1400 px max) et converties en WebP pour un chargement rapide sur mobile.
 - Santé du service : `GET /healthz` répond `ok`.
+
+## Sécurité et exploitation (v2)
+
+- En-têtes : CSP stricte (aucun script en ligne), HSTS, X-Frame-Options, Permissions-Policy ; pages `/admin`, `/super`, `/connexion` jamais mises en cache.
+- Sessions : changer son mot de passe déconnecte les autres appareils ; réponse de connexion à temps constant.
+- Sauvegarde : copie quotidienne de la base dans `DATA_DIR/backups` (7 jours conservés) et bouton « Sauvegarde » dans l'espace super admin (téléchargement du fichier `.db`).
+- Le tableau de bord super admin affiche un avertissement tant que le disque permanent Render n'est pas branché sur `/var/data`.
+- Journal des requêtes dans les logs Render ; `/healthz` pour la surveillance.

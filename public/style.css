@@ -206,8 +206,8 @@ header.site.open .navtoggle span::after { transform: translateY(-7px) rotate(-45
   -webkit-mask-image: radial-gradient(circle at var(--mx) var(--my), #000 0, transparent 68%); mask-image: radial-gradient(circle at var(--mx) var(--my), #000 0, transparent 68%);
   opacity: .55;
 }
-.hero::before { --mx: 0%; --my: 0%; left: 0; top: 0; }
-.hero::after { --mx: 100%; --my: 100%; right: 0; bottom: 0; background-image: radial-gradient(circle, var(--red) 0 2.2px, transparent 2.8px); opacity: .35; }
+.hero::before { --mx: 0%; --my: 0%; left: 0; top: 0; transform: translateY(var(--py, 0px)); }
+.hero::after { --mx: 100%; --my: 100%; right: 0; bottom: 0; transform: translateY(calc(var(--py, 0px) * -1)); background-image: radial-gradient(circle, var(--red) 0 2.2px, transparent 2.8px); opacity: .35; }
 .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: clamp(24px, 5vw, 64px); align-items: center; }
 .hero-copy > * { animation: rise .8s var(--ease) both; }
 .hero-copy > :nth-child(1) { animation-delay: .05s; } .hero-copy > :nth-child(2) { animation-delay: .15s; }
@@ -253,8 +253,38 @@ section { padding-block: clamp(40px, 7vw, 84px); }
 .imgbox { display: block; position: relative; width: 100%; aspect-ratio: 4 / 3; background: var(--surface); overflow: hidden; border: 0; padding: 0; }
 .imgbox img, .imgbox svg, .imgbox .ph { width: 100%; height: 100%; object-fit: cover; transition: transform .6s var(--ease); }
 .moto:hover .imgbox img, .moto:hover .imgbox svg { transform: scale(1.06); }
-.ph { display: grid; place-items: center; }
-.ph svg { width: 80%; height: auto; }
+.js .imgbox img.fade, .js .heroart-card img.fade { opacity: 0; transition: opacity .6s var(--ease), transform .6s var(--ease); }
+.js .imgbox img.fade.loaded, .js .heroart-card img.fade.loaded { opacity: 1; }
+.ph { display: grid; place-items: center; align-content: center; gap: 10px; background: repeating-linear-gradient(135deg, var(--surface) 0 12px, color-mix(in srgb, var(--surface) 80%, var(--green)) 12px 13px); }
+.ph img { width: 64px; height: 64px; border-radius: 50%; opacity: .85; object-fit: contain; animation: none; }
+.ph span { font: 800 italic .95rem/1 var(--f-disp); text-transform: uppercase; letter-spacing: .1em; color: var(--mut); }
+
+/* Défilement : barre de progression */
+.progress { position: fixed; left: 0; top: 0; height: 3px; width: 100%; z-index: 90; background: linear-gradient(90deg, var(--green-l), var(--red)); transform: scaleX(0); transform-origin: left; pointer-events: none; }
+
+/* Effet d'inclinaison 3D des cartes */
+.tilt { transform-style: preserve-3d; will-change: transform; }
+
+/* Visionneuse photo */
+.zoomable { cursor: zoom-in; }
+.lightbox { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(5, 8, 5, .92); opacity: 0; visibility: hidden; transition: opacity .25s, visibility 0s .25s; }
+.lightbox.on { opacity: 1; visibility: visible; transition-delay: 0s; }
+.lightbox img { max-width: min(96vw, 1400px); max-height: 90vh; width: auto; height: auto; border-radius: var(--r-m); transform: scale(.94); transition: transform .35s var(--ease); object-fit: contain; }
+.lightbox.on img { transform: none; }
+.lightbox button { position: absolute; top: max(14px, env(safe-area-inset-top, 0px)); right: 14px; width: 48px; height: 48px; border-radius: 50%; border: 0; background: #fff; color: #000; font-size: 1.6rem; line-height: 1; }
+
+/* Ondulation des boutons */
+.btn { position: relative; overflow: hidden; }
+.ripple { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, .45); transform: scale(0); animation: ripple .6s ease-out forwards; pointer-events: none; }
+@keyframes ripple { to { transform: scale(1); opacity: 0; } }
+
+/* Titre du héros : mots qui montent un par un */
+.hero h1 .w { display: inline-block; opacity: 0; transform: translateY(.5em) rotate(2deg); animation: word .7s var(--ease) forwards; animation-delay: calc(.12s + var(--k, 0) * 70ms); }
+@keyframes word { to { opacity: 1; transform: none; } }
+
+/* Transition douce entre les pages (navigateurs compatibles) */
+@view-transition { navigation: auto; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .25s; }
 .soldtag { position: absolute; top: 12px; left: 12px; background: var(--ink); color: var(--bg); font-weight: 800; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; padding: 4px 12px; border-radius: 99px; }
 .info { padding: 16px 18px 18px; display: grid; gap: 2px; }
 .info h3 { font-size: 1.12rem; line-height: 1.25; font-weight: 700; }
@@ -404,5 +434,6 @@ body { animation: fadein .5s ease both; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
   .js .reveal { opacity: 1; transform: none; }
+  .hero h1 .w, .js .imgbox img.fade, .js .heroart-card img.fade { opacity: 1 !important; transform: none !important; }
   .ribbon-track { width: auto; flex-wrap: wrap; }
 }

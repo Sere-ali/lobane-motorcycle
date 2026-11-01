@@ -4,10 +4,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fcfa = (n) => new Intl.NumberFormat('fr-FR').format(n).replace(/ | /g, ' ') + ' F CFA';
 const digits = (s) => String(s || '').replace(/\D/g, '');
 
-const PALETTE = ['#fde7e9', '#e3f3e7', '#ececec', '#e8f1ff', '#fff3d9'];
-const COLORS = ['#e30613', '#1a9a3c', '#333333', '#1a6fd6', '#c47f00'];
-const placeholder = (id = 0) => `<div class="ph" style="background:${PALETTE[id % PALETTE.length]};color:${COLORS[id % COLORS.length]}"><svg viewBox="0 0 400 220" aria-hidden="true"><use href="#moto"/></svg></div>`;
-const motoImg = (m) => (m.image ? `<img src="/uploads/${esc(m.image)}" alt="${esc(m.title)}" loading="lazy">` : placeholder(m.id));
+// Sans photo : le logo de la marque (pas de dessin). Avec photo : image en fondu à l'affichage.
+const placeholder = () => `<div class="ph"><img src="/img/logo-badge-96.png" width="96" height="96" alt="" loading="lazy"><span>Photo bientôt disponible</span></div>`;
+const motoImg = (m, eager = false) => (m.image ? `<img class="fade" src="/uploads/${esc(m.image)}" alt="${esc(m.title)}" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">` : placeholder());
 
 const SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <g id="moto"><circle cx="90" cy="150" r="46" fill="none" stroke="#111" stroke-width="10"/><circle cx="90" cy="150" r="14" fill="#111"/>
