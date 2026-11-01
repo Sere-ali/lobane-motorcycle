@@ -151,6 +151,13 @@
     addInstall(function () { window.alert('Pour installer l\'application sur iPhone : appuyez sur le bouton Partager (carré avec une flèche) puis sur « Sur l\'écran d\'accueil ».'); });
   }
 
+
+  // 0n. Champs « contact » : chiffres uniquement
+  doc.querySelectorAll('input[name="phone"], input[name="whatsapp"]').forEach(function (inp) {
+    var clean = function () { var v = inp.value.replace(/\D/g, '').slice(0, 15); if (v !== inp.value) inp.value = v; };
+    inp.addEventListener('input', clean); clean();
+  });
+
   // 0h. Léger décalage (parallaxe) des motifs du héros
   var hero = doc.querySelector('.hero');
   if (hero && !reduce) {

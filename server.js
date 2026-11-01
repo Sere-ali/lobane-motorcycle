@@ -10,6 +10,7 @@ const path = require('path');
 const { db, seed, TYPES, DATA_DIR, backup, storageIsPersistent, syncImages } = require('./db');
 const V = require('./views');
 const { esc, fcfa, digits, km, etatBadge, shopLine, layout, motoCard, filterForm, motoForm, motoImg, typeIcon } = V;
+const num = (v) => digits(v).slice(0, 15); // contacts : chiffres uniquement
 
 const PROD = process.env.NODE_ENV === 'production';
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -259,7 +260,7 @@ app.get('/', (req, res) => {
 <section class="alt-bg"><div class="wrap" style="max-width:680px"><h2 class="reveal">Une question ?</h2><p class="sub reveal">Laissez-nous votre demande, on vous rappelle.</p>
   <form class="stack panel reveal" method="post" action="/demande">
     <label>Votre nom<input name="name" required maxlength="80" autocomplete="name"></label>
-    <label>Téléphone<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel"></label>
+    <label>Téléphone<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" required autocomplete="tel" maxlength="15"></label>
     <label>Je cherche…<select name="subject"><option>Une moto</option><option>Des pièces détachées</option><option>Des équipements</option><option>Une assurance</option></select></label>
     <label>Message<textarea name="message" rows="4" maxlength="1000"></textarea></label>
     <button class="btn red" type="submit">Envoyer ma demande</button></form></div></section>`,
@@ -319,7 +320,7 @@ app.get('/moto/:id(\\d+)', (req, res) => {
       ${m.status === 'vendu' ? '<div class="box"><b>Cette moto est vendue.</b> <a href="/motos">Voir les autres motos</a></div>' : `<div class="box contactbox"><b>Commander cette moto</b>
         <div class="cta"><a class="btn wa" href="/moto/${m.id}/commander">🛒 Commander</a><a class="btn alt" href="tel:${esc(tel)}">📞 Appeler</a><a class="btn alt" href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener">💬 Poser une question</a></div></div>`}
       <form class="stack panel" style="margin-top:18px" method="post" action="/moto/${m.id}/demande"><b>Ou laissez votre numéro, on vous rappelle</b>
-        <label>Votre nom<input name="name" required maxlength="80"></label><label>Téléphone<input name="phone" required maxlength="30" inputmode="tel"></label>
+        <label>Votre nom<input name="name" required maxlength="80"></label><label>Téléphone<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" required maxlength="15"></label>
         <label>Message (facultatif)<textarea name="message" rows="3" maxlength="1000"></textarea></label><button class="btn red" type="submit">Envoyer</button></form>
     </div></div></div></section>`,
   });
@@ -337,7 +338,7 @@ app.get('/moto/:id(\\d+)/commander', (req, res) => {
     <div class="ordersum"><div class="thumbbox">${motoImg(m)}</div><div><b>${esc(m.title)}</b><br><span class="price">${fcfa(m.price)}${m.negotiable ? '<em class="nego">négociable</em>' : ''}</span><br><small>${shopLine(m)}</small></div></div>
     <form class="stack panel" method="post" action="/moto/${m.id}/commander">
       <label>Votre nom<input name="name" required maxlength="80" autocomplete="name"></label>
-      <label>Téléphone (WhatsApp de préférence)<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel"></label>
+      <label>Téléphone (WhatsApp de préférence)<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" required autocomplete="tel" maxlength="15"></label>
       <label>Quartier / commune de livraison <span class="hint">(facultatif)</span><input name="place" maxlength="120" placeholder="Ex. Koumassi, 3 Ampoules"></label>
       <label>Message <span class="hint">(facultatif)</span><textarea name="message" rows="3" maxlength="600" placeholder="Une précision, un horaire pour vous rappeler…"></textarea></label>
       <button class="btn wa" type="submit">✅ Envoyer ma commande</button>
@@ -350,7 +351,7 @@ app.post('/moto/:id(\\d+)/commander', (req, res) => {
   if (!m || m.status === 'vendu') return res.redirect(m ? `/moto/${m.id}` : '/motos');
   const back = `/moto/${m.id}/commander`;
   if (limited(`ord:${req.ip}`, 5, 10 * 60e3)) { flash(res, 'err', 'Trop de commandes en peu de temps. Réessayez dans quelques minutes.'); return res.redirect(back); }
-  const name = String(req.body.name || '').trim().slice(0, 80); const phone = String(req.body.phone || '').trim().slice(0, 30);
+  const name = String(req.body.name || '').trim().slice(0, 80); const phone = num(req.body.phone);
   if (!name || digits(phone).length < 8) { flash(res, 'err', 'Indiquez votre nom et un numéro de téléphone valide.'); return res.redirect(back); }
   const place = String(req.body.place || '').trim().slice(0, 120); const message = String(req.body.message || '').trim().slice(0, 600);
   const r = db.prepare('INSERT INTO orders (shop_id, moto_id, moto_title, price, name, phone, place, message) VALUES (?,?,?,?,?,?,?,?)').run(m.user_id, m.id, m.title, m.price, name, phone, place, message);
@@ -369,7 +370,7 @@ app.post('/moto/:id(\\d+)/commander', (req, res) => {
 
 function saveInquiry(req, res, shopId, motoId, back) {
   if (limited(`inq:${req.ip}`, 5, 10 * 60e3)) { flash(res, 'err', 'Trop de demandes. Réessayez dans quelques minutes.'); return res.redirect(back); }
-  const name = String(req.body.name || '').trim().slice(0, 80); const phone = String(req.body.phone || '').trim().slice(0, 30);
+  const name = String(req.body.name || '').trim().slice(0, 80); const phone = num(req.body.phone);
   if (!name || digits(phone).length < 8) { flash(res, 'err', 'Merci d\'indiquer votre nom et un numéro de téléphone valide.'); return res.redirect(back); }
   db.prepare('INSERT INTO inquiries (shop_id,moto_id,name,phone,subject,message) VALUES (?,?,?,?,?,?)')
     .run(shopId, motoId, name, phone, String(req.body.subject || '').slice(0, 60), String(req.body.message || '').trim().slice(0, 1000));
@@ -391,7 +392,7 @@ app.get('/inscription', (req, res) => {
   <form class="stack panel reveal" method="post" action="/inscription">
     <label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan" autocomplete="organization"></label>
     <label>E-mail (pour vous connecter)<input type="email" name="email" required autocomplete="username"></label>
-    <div class="two"><label>Téléphone<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" maxlength="30" inputmode="tel"></label></div>
+    <div class="two"><label>Téléphone<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" required autocomplete="tel" maxlength="15"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" maxlength="15"></label></div>
     <label>Mot de passe <span class="hint">(8 caractères minimum)</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
     <div class="hp" aria-hidden="true"><label>Ne pas remplir<input name="website" tabindex="-1" autocomplete="off"></label></div>
     <button class="btn red" type="submit">Envoyer ma demande</button>
@@ -404,14 +405,14 @@ app.post('/inscription', async (req, res) => {
   if (String(b.website || '') !== '') return res.redirect('/inscription'); // champ piège : un robot l'a rempli
   if (limited(`signup:${req.ip}`, 3, 3600e3)) { flash(res, 'err', 'Trop de demandes. Réessayez plus tard.'); return res.redirect('/inscription'); }
   const email = String(b.email || '').trim().toLowerCase(); const shop = String(b.shop_name || '').trim().slice(0, 80);
-  const phone = String(b.phone || '').trim().slice(0, 30); const pw = String(b.password || '');
+  const phone = num(b.phone); const pw = String(b.password || '');
   if (!shop || !EMAIL_RE.test(email) || email.length > 120 || digits(phone).length < 8 || pw.length < 8 || pw.length > 200) {
     flash(res, 'err', 'Vérifiez le nom, l\'e-mail, le téléphone et le mot de passe (8 caractères minimum).'); return res.redirect('/inscription');
   }
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail. Connectez-vous ou utilisez un autre e-mail.'); return res.redirect('/inscription'); }
   if (db.prepare("SELECT COUNT(*) c FROM users WHERE status='pending'").get().c >= 100) { flash(res, 'err', 'Trop de demandes en attente pour le moment. Réessayez plus tard.'); return res.redirect('/inscription'); }
   db.prepare("INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp,status) VALUES (?,?,'admin',?,?,?,'pending')")
-    .run(email, await bcrypt.hash(pw, 10), shop, phone, String(b.whatsapp || phone).trim().slice(0, 30));
+    .run(email, await bcrypt.hash(pw, 10), shop, phone, num(b.whatsapp) || phone);
   res.locals.render({ title: 'Demande envoyée – Lobane Motorcycle', body: `<section><div class="wrap narrow" style="max-width:640px;text-align:center"><div class="okmark" aria-hidden="true">✓</div><h2 style="display:inline-block">Demande envoyée</h2>
   <p class="sub" style="margin-inline:auto">Merci ! Le compte de <b>${esc(shop)}</b> est en attente de validation par le super administrateur de Lobane Motorcycle. Dès qu'il est validé, connectez-vous avec <b>${esc(email)}</b> pour publier vos annonces.</p>
   <div class="cta" style="justify-content:center;margin-top:14px"><a class="btn" href="/">Retour à l'accueil</a><a class="btn alt" href="/connexion">Se connecter</a></div></div></section>` });
@@ -601,8 +602,8 @@ app.post('/admin/moto/:id(\\d+)/supprimer', requireAuth, (req, res) => {
 // ---- profil (téléphone, WhatsApp, logo, mot de passe) ----
 app.get('/admin/profil', requireAuth, (req, res) => {
   res.locals.render({ title: 'Mon profil', body: `<section><div class="wrap narrow"><h2>Mon profil</h2><p class="sub">${esc(req.user.email)}</p>
-  <form class="stack panel" method="post" action="/admin/profil" enctype="multipart/form-data"><label>Téléphone (appels)<input name="phone" value="${esc(req.user.phone)}" maxlength="30"></label>
-  <label>Numéro WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" value="${esc(req.user.whatsapp)}" maxlength="30"></label>
+  <form class="stack panel" method="post" action="/admin/profil" enctype="multipart/form-data"><label>Téléphone (appels)<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" value="${esc(req.user.phone)}" maxlength="15"></label>
+  <label>Numéro WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" value="${esc(req.user.whatsapp)}" maxlength="15"></label>
   <label>Logo de la boutique <span class="hint">(facultatif)</span>${req.user.logo ? `<span class="logoprev"><img src="/uploads/${esc(req.user.logo)}" alt="" width="56" height="56"><span class="chk"><input type="checkbox" name="remove_logo" value="1"> Retirer le logo</span></span>` : ''}<input type="file" name="logo" accept="image/jpeg,image/png,image/webp"></label>
   <label>Nouveau mot de passe <span class="hint">(laisser vide pour ne pas changer, 8 caractères minimum)</span><input type="password" name="password" minlength="8" autocomplete="new-password"></label>
   <button class="btn" type="submit">Enregistrer</button></form></div></section>` });
@@ -610,7 +611,7 @@ app.get('/admin/profil', requireAuth, (req, res) => {
 app.post('/admin/profil', requireAuth, handleUpload, (req, res) => {
   const pw = String(req.body.password || '');
   if (pw && pw.length < 8) { discardSaved(req.saved); flash(res, 'err', 'Mot de passe trop court (8 caractères minimum).'); return res.redirect('/admin/profil'); }
-  db.prepare('UPDATE users SET phone=?, whatsapp=? WHERE id=?').run(String(req.body.phone || '').slice(0, 30), String(req.body.whatsapp || '').slice(0, 30), req.user.id);
+  db.prepare('UPDATE users SET phone=?, whatsapp=? WHERE id=?').run(num(req.body.phone), num(req.body.whatsapp), req.user.id);
   if (req.saved.logo || isOn(req.body.remove_logo)) { rmFile(req.user.logo); db.prepare('UPDATE users SET logo=? WHERE id=?').run(req.saved.logo || null, req.user.id); }
   if (pw) {
     db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(pw, 10), req.user.id);
@@ -700,7 +701,7 @@ app.get('/super/compte/nouveau', requireAuth, requireSuper, (req, res) => {
   res.locals.render({ title: 'Créer un compte', body: `<section><div class="wrap narrow" style="max-width:680px"><p class="crumbs"><a href="/super">Super administrateur</a><span>›</span>Créer un compte</p>
   <h2>Créer un compte</h2><p class="sub">Une boutique et son gérant (il publie les annonces et suit les commandes), ou un autre super administrateur.</p>
   <form class="stack panel" method="post" action="/super/boutique"><div class="two"><label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan"></label><label>E-mail de connexion<input type="email" name="email" required></label></div>
-  <div class="two"><label>Téléphone<input name="phone" maxlength="30"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" maxlength="30"></label></div>
+  <div class="two"><label>Téléphone<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" maxlength="15"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" maxlength="15"></label></div>
   <div class="two"><label>Type de compte<select name="role"><option value="admin">Gérant de boutique (publie des annonces)</option><option value="super">Super administrateur (voit et gère tout)</option></select></label>
   <label>Mot de passe initial <span class="hint">(8 caractères minimum)</span><input name="password" required minlength="8" autocomplete="off"></label></div>
   <div class="actions"><button class="btn" type="submit">Créer le compte</button><a class="btn alt" href="/super">Annuler</a></div></form></div></section>` });
@@ -712,7 +713,7 @@ app.post('/super/boutique', requireAuth, requireSuper, (req, res) => {
   const bad = !shop ? 'Le nom de la boutique est vide.' : !EMAIL_RE.test(email) ? `L'e-mail « ${email || 'vide'} » n'est pas valide : il doit ressembler à nom@exemple.com (avec un point après le @).` : String(b.password || '').length < 8 ? `Le mot de passe est trop court (${String(b.password || '').length} caractère(s)) : 8 minimum.` : '';
   if (bad) { flash(res, 'err', bad); return res.redirect('/super/compte/nouveau'); }
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail.'); return res.redirect('/super/compte/nouveau'); }
-  db.prepare('INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp) VALUES (?,?,?,?,?,?)').run(email, bcrypt.hashSync(String(b.password), 10), role, shop, String(b.phone || '').slice(0, 30), String(b.whatsapp || b.phone || '').slice(0, 30));
+  db.prepare('INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp) VALUES (?,?,?,?,?,?)').run(email, bcrypt.hashSync(String(b.password), 10), role, shop, num(b.phone), num(b.whatsapp) || num(b.phone));
   flash(res, 'ok', role === 'super' ? `Super administrateur « ${shop} » créé.` : `Boutique « ${shop} » créée : son gérant peut se connecter et publier.`); res.redirect('/super');
 });
 
@@ -759,7 +760,7 @@ app.get('/super/boutique/:id(\\d+)/modifier', requireAuth, requireSuper, (req, r
   <form class="stack panel" method="post" action="/super/boutique/${u.id}/modifier" enctype="multipart/form-data">
   <label>Nom de la boutique<input name="shop_name" required maxlength="80" value="${esc(u.shop_name)}"></label>
   <label>E-mail de connexion<input type="email" name="email" required value="${esc(u.email)}"></label>
-  <div class="two"><label>Téléphone<input name="phone" maxlength="30" value="${esc(u.phone)}"></label><label>WhatsApp<input name="whatsapp" maxlength="30" value="${esc(u.whatsapp)}"></label></div>
+  <div class="two"><label>Téléphone<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" value="${esc(u.phone)}" maxlength="15"></label><label>WhatsApp<input name="whatsapp" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" title="Chiffres uniquement (8 à 15)" value="${esc(u.whatsapp)}" maxlength="15"></label></div>
   <label>Logo de la boutique <span class="hint">(facultatif)</span>${u.logo ? `<span class="logoprev"><img src="/uploads/${esc(u.logo)}" alt="" width="56" height="56"><span class="chk"><input type="checkbox" name="remove_logo" value="1"> Retirer le logo</span></span>` : ''}<input type="file" name="logo" accept="image/jpeg,image/png,image/webp"></label>
   <div class="actions"><button class="btn" type="submit">Enregistrer</button><a class="btn alt" href="/super">Annuler</a></div></form></div></section>` });
 });
@@ -770,7 +771,7 @@ app.post('/super/boutique/:id(\\d+)/modifier', requireAuth, requireSuper, handle
   const email = String(req.body.email || '').trim().toLowerCase(); const shop = String(req.body.shop_name || '').trim().slice(0, 80);
   if (!shop || !EMAIL_RE.test(email)) { discardSaved(req.saved); flash(res, 'err', 'Vérifiez le nom et l\'e-mail.'); return res.redirect(back); }
   if (db.prepare('SELECT 1 FROM users WHERE email=? AND id<>?').get(email, u.id)) { discardSaved(req.saved); flash(res, 'err', 'Un autre compte utilise déjà cet e-mail.'); return res.redirect(back); }
-  db.prepare('UPDATE users SET shop_name=?, email=?, phone=?, whatsapp=? WHERE id=?').run(shop, email, String(req.body.phone || '').slice(0, 30), String(req.body.whatsapp || '').slice(0, 30), u.id);
+  db.prepare('UPDATE users SET shop_name=?, email=?, phone=?, whatsapp=? WHERE id=?').run(shop, email, num(req.body.phone), num(req.body.whatsapp), u.id);
   if (req.saved.logo || isOn(req.body.remove_logo)) { rmFile(u.logo); db.prepare('UPDATE users SET logo=? WHERE id=?').run(req.saved.logo || null, u.id); }
   flash(res, 'ok', `${shop} mis à jour.`); res.redirect('/super');
 });
