@@ -323,6 +323,7 @@ app.post('/moto/:id(\\d+)/commander', (req, res) => {
   const place = String(req.body.place || '').trim().slice(0, 120); const message = String(req.body.message || '').trim().slice(0, 600);
   const r = db.prepare('INSERT INTO orders (shop_id, moto_id, moto_title, price, name, phone, place, message) VALUES (?,?,?,?,?,?,?,?)').run(m.user_id, m.id, m.title, m.price, name, phone, place, message);
   const num = Number(r.lastInsertRowid);
+  logAct(m.user_id, 'commande', `Commande n°${num} : ${m.title} (${name})`, m.price);
   const wa = digits(m.whatsapp || m.phone) || '2250505137178';
   const txt = encodeURIComponent(`Bonjour, je viens de passer la commande n°${num} sur le site Lobane Motorcycle : ${m.title} (${fcfa(m.price)}).\nNom : ${name}\nTéléphone : ${phone}${place ? '\nLivraison : ' + place : ''}`);
   res.locals.render({
@@ -449,14 +450,39 @@ function inquiriesTable(rows, showShop) {
 const motoRows = (motos, { showShop = false } = {}) => motos.map((m) => `<tr><td>${m.image ? `<img class="thumb" src="/uploads/${esc(m.image)}" alt="">` : ''}</td><td><a href="/moto/${m.id}"><b>${esc(m.title)}</b></a>${m.featured ? ' <span class="pill new">★ à la une</span>' : ''}</td>${showShop ? `<td>${esc(m.shop_name)}${m.active ? '' : ' <span class="pill off">suspendue</span>'}</td>` : ''}<td>${esc(m.type)}<br><small>${m.etat === 'occasion' ? 'Occasion' : 'Neuf'}${m.year ? ' · ' + esc(m.year) : ''}</small></td><td>${fcfa(m.price)}</td><td>${statusPill(m.status)}</td>
   <td><div class="actions"><a class="btn alt sm" href="/admin/moto/${m.id}/modifier">Modifier</a><form method="post" action="/admin/moto/${m.id}/supprimer" data-confirm="Supprimer cette moto ?"><button class="btn danger sm">Supprimer</button></form></div></td></tr>`).join('');
 
+
+// ================= SUIVI DES BOUTIQUES (mouvements, stock, ventes) =================
+const ACT = { publication: ['🆕', 'Publication'], modification: ['✏️', 'Modification'], vente: ['💰', 'Vente'], retour: ['↩️', 'Remise en vente'], suppression: ['🗑️', 'Suppression'], commande: ['🛒', 'Commande reçue'], statut: ['📦', 'Commande'] };
+function logAct(shopId, kind, label, amount = null) {
+  try { db.prepare('INSERT INTO activity (shop_id,kind,label,amount) VALUES (?,?,?,?)').run(shopId, kind, String(label).slice(0, 200), amount); } catch (e) { console.error('activity', e.message); }
+}
+// Chiffres d'une boutique (ou de toutes si shopId vaut null)
+function shopStats(shopId) {
+  const w = shopId ? 'WHERE user_id=?' : ''; const a = shopId ? [shopId] : [];
+  const m = db.prepare(`SELECT COUNT(*) total, SUM(status='disponible') stock, COALESCE(SUM(CASE WHEN status='disponible' THEN price END),0) stockValue, SUM(status='vendu') sold, COALESCE(SUM(CASE WHEN status='vendu' THEN price END),0) revenue FROM motos ${w}`).get(...a);
+  const wo = shopId ? 'WHERE shop_id=?' : '';
+  const o = db.prepare(`SELECT COUNT(*) total, SUM(status='nouvelle') news, SUM(status='confirmee') confirmed, SUM(status='livree') delivered, SUM(status='annulee') cancelled, COALESCE(SUM(CASE WHEN status='livree' THEN price END),0) delivered_amount FROM orders ${wo}`).get(...a);
+  const last = db.prepare(`SELECT MAX(created_at) t FROM activity ${shopId ? 'WHERE shop_id=?' : ''}`).get(...a).t;
+  return { total: m.total || 0, stock: m.stock || 0, stockValue: m.stockValue, sold: m.sold || 0, revenue: m.revenue,
+    orders: o.total || 0, news: o.news || 0, confirmed: o.confirmed || 0, delivered: o.delivered || 0, cancelled: o.cancelled || 0, last };
+}
+// Bannière animée des espaces d'administration : une moto qui roule sur la route
+const MOTO_SVG = `<svg class="bk" viewBox="0 0 220 120" aria-hidden="true"><g class="bk-body"><path d="M60 78 L92 50 L128 50 L150 66 L172 66" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M92 50 L84 36 L104 36 L128 50" fill="currentColor" opacity=".92"/><path d="M150 66 L162 40 L176 40" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle cx="175" cy="62" r="5" fill="#ffd54a"/><path d="M96 56 L120 56 L112 78 L88 78Z" fill="currentColor" opacity=".7"/></g><g class="wh wh1"><circle cx="58" cy="90" r="22" fill="none" stroke="currentColor" stroke-width="7"/><path d="M58 70v40M38 90h40M44 76l28 28M72 76L44 104" stroke="currentColor" stroke-width="2.5"/></g><g class="wh wh2"><circle cx="172" cy="90" r="22" fill="none" stroke="currentColor" stroke-width="7"/><path d="M172 70v40M152 90h40M158 76l28 28M186 76l-28 28" stroke="currentColor" stroke-width="2.5"/></g></svg>`;
+const dashBanner = ({ tag, title, sub = '', actions = '' }) => `<div class="dashhero reveal">
+  <div class="dashhero-text"><span class="tag">${tag}</span><h2>${title}</h2>${sub ? `<p>${sub}</p>` : ''}<div class="actions">${actions}</div></div>
+  <div class="dashhero-road" aria-hidden="true"><span class="speed s1"></span><span class="speed s2"></span><span class="speed s3"></span><div class="rider">${MOTO_SVG}</div><div class="lane"></div></div></div>`;
+const kpiX = (n, l, o = {}) => `<div class="kpi reveal${o.tone ? ' ' + o.tone : ''}"><strong data-count="${n}"${o.suffix ? ` data-suffix="${o.suffix}"` : ''}>${n}</strong><span>${l}</span></div>`;
+const kpiMoney = (n, l, tone = '') => `<div class="kpi money reveal ${tone}"><strong>${fcfa(n)}</strong><span>${l}</span></div>`;
+
 app.get('/admin', requireAuth, (req, res) => {
   if (req.user.role === 'super') return res.redirect('/super');
   const q = searchQ(req); const c = newCounts(req.user);
   const motos = db.prepare('SELECT * FROM motos WHERE user_id=? ORDER BY id DESC').all(req.user.id);
-  const kpi = (n, l) => `<div class="kpi reveal"><strong data-count="${n}">${n}</strong><span>${l}</span></div>`;
+  const st = shopStats(req.user.id);
   res.locals.render({ title: 'Mon espace boutique', body: `<section><div class="wrap">
-  <div class="dash-head"><div><span class="tag">Espace gérant</span><h2 style="margin-top:12px">${esc(req.user.shop_name)}</h2><p class="sub" style="margin:10px 0 0">C'est vous qui publiez les annonces de votre boutique et qui suivez les commandes des clients.</p></div><div class="actions"><a class="btn" href="/admin/moto/nouvelle">+ Publier une annonce</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
-  <div class="kpis">${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}${kpi(motos.filter((m) => m.status === 'disponible').length, 'Annonces en ligne')}${kpi(motos.filter((m) => m.status === 'vendu').length, 'Motos vendues')}</div>
+  ${dashBanner({ tag: 'Espace gérant', title: esc(req.user.shop_name), sub: 'C\'est vous qui publiez les annonces de votre boutique et qui suivez les commandes des clients.', actions: '<a class="btn" href="/admin/moto/nouvelle">+ Publier une annonce</a><a class="btn alt" href="/admin/profil">Mon profil</a>' })}
+  <div class="kpis">${kpiX(c.orders, 'Commandes à traiter')}${kpiX(c.inquiries, 'Demandes à rappeler')}${kpiX(st.stock, 'Motos en stock')}${kpiX(st.sold, 'Motos vendues')}</div>
+  <div class="kpis kpis3">${kpiMoney(st.stockValue, 'Valeur du stock')}${kpiMoney(st.revenue, 'Ventes réalisées', 'gold')}${kpiX(st.delivered, 'Commandes livrées')}</div>
   ${searchBar('/admin', q)}
   <h3 class="sec">Commandes</h3>${ordersTable(loadOrders(req.user, q), false)}
   <h3 class="sec">Mes annonces</h3>
@@ -473,7 +499,14 @@ function setStatus(req, res, kind) {
 app.post('/admin/commande/:id(\\d+)/statut', requireAuth, (req, res) => {
   const o = setStatus(req, res, 'orders');
   const st = String(req.body.status || '');
-  if (o && ORDER_STATUS[st]) { db.prepare("UPDATE orders SET status=?, updated_at=datetime('now') WHERE id=?").run(st, o.id); flash(res, 'ok', `Commande n°${o.id} : ${ORDER_STATUS[st].toLowerCase()}.`); }
+  if (o && ORDER_STATUS[st]) {
+    db.prepare("UPDATE orders SET status=?, updated_at=datetime('now') WHERE id=?").run(st, o.id);
+    if (o.status !== st) {
+      logAct(o.shop_id, 'statut', `Commande n°${o.id} « ${o.moto_title} » : ${ORDER_STATUS[st].toLowerCase()}`, st === 'livree' ? o.price : null);
+      const mm = o.moto_id && db.prepare('SELECT * FROM motos WHERE id=?').get(o.moto_id);
+      if (st === 'livree' && mm && mm.status !== 'vendu') { db.prepare("UPDATE motos SET status='vendu' WHERE id=?").run(mm.id); logAct(o.shop_id, 'vente', `Vendue (commande livrée) : ${mm.title}`, mm.price); }
+    }
+    flash(res, 'ok', `Commande n°${o.id} : ${ORDER_STATUS[st].toLowerCase()}.`); }
   else if (o) flash(res, 'err', 'Statut invalide.');
   res.redirect(homeOf(req.user));
 });
@@ -493,6 +526,8 @@ app.post('/admin/moto/nouvelle', requireAuth, handleUpload, (req, res) => {
   const r = db.prepare('INSERT INTO motos (user_id,title,brand,type,price,description,status,year,mileage,color,etat,negotiable,featured) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(req.user.id, d.title, d.brand, d.type, d.price, d.description, d.status, d.year, d.mileage, d.color, d.etat, d.negotiable, req.user.role === 'super' ? d.featured : 0);
   writePhotos(Number(r.lastInsertRowid), req.saved.images);
+  logAct(req.user.id, 'publication', `Annonce publiée : ${d.title}`, d.price);
+  if (d.status === 'vendu') logAct(req.user.id, 'vente', `Vendue : ${d.title}`, d.price);
   flash(res, 'ok', 'Annonce publiée : elle est visible sur la page d\'accueil.'); res.redirect(homeOf(req.user));
 });
 
@@ -520,11 +555,14 @@ app.post('/admin/moto/:id(\\d+)/modifier', requireAuth, handleUpload, (req, res)
   writePhotos(m.id, [...keep.map((p) => p.filename), ...req.saved.images]);
   db.prepare('UPDATE motos SET title=?,brand=?,type=?,price=?,description=?,status=?,year=?,mileage=?,color=?,etat=?,negotiable=?,featured=? WHERE id=?')
     .run(d.title, d.brand, d.type, d.price, d.description, d.status, d.year, d.mileage, d.color, d.etat, d.negotiable, req.user.role === 'super' ? d.featured : m.featured, m.id);
+  if (m.status !== d.status) logAct(m.user_id, d.status === 'vendu' ? 'vente' : 'retour', `${d.status === 'vendu' ? 'Vendue' : 'Remise en vente'} : ${d.title}`, d.price);
+  else logAct(m.user_id, 'modification', `Annonce modifiée : ${d.title}`, d.price);
   flash(res, 'ok', 'Annonce mise à jour.'); res.redirect(homeOf(req.user));
 });
 app.post('/admin/moto/:id(\\d+)/supprimer', requireAuth, (req, res) => {
   const m = ownMoto(req, res); if (!m) return;
   removeMotoFiles(m.id); db.prepare('DELETE FROM motos WHERE id=?').run(m.id);
+  logAct(m.user_id, 'suppression', `Annonce supprimée : ${m.title}`, m.price);
   flash(res, 'ok', 'Annonce supprimée.'); res.redirect(homeOf(req.user));
 });
 
@@ -559,7 +597,8 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
   const shops = users.filter((u) => u.role === 'admin' && u.status !== 'pending'); const admins = users.filter((u) => u.role === 'super');
   const motos = db.prepare('SELECT m.*, u.shop_name, u.active FROM motos m JOIN users u ON u.id=m.user_id ORDER BY m.id DESC LIMIT 300').all();
   const total = motos.reduce((s, m) => s + m.price, 0);
-  const kpi = (n, l) => `<div class="kpi reveal"><strong data-count="${n}">${n}</strong><span>${l}</span></div>`;
+  const all = shopStats(null);
+  const perShop = shops.map((u) => ({ u, st: shopStats(u.id) })); const maxRev = Math.max(1, ...perShop.map((x) => x.st.revenue));
   const acctRows = (list) => list.map((s) => {
     const self = s.id === req.user.id;
     return `<tr><td>${s.logo ? `<img class="shoplogo" src="/uploads/${esc(s.logo)}" alt="" width="22" height="22"> ` : ''}<b>${esc(s.shop_name)}</b>${self ? ' <span class="pill on">vous</span>' : ''}</td><td>${esc(s.email)}</td><td>${esc(s.phone || '')}</td><td>${s.nb}${s.newo ? ` <span class="pill new">${s.newo} cmd</span>` : ''}</td><td><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'Actif' : 'Suspendu'}</span></td>
@@ -569,9 +608,10 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
     <form method="post" action="/super/boutique/${s.id}/supprimer" data-confirm="Supprimer ce compte${s.role === 'admin' ? ', toutes ses annonces et ses commandes' : ''} ? Cette action est définitive."><button class="btn danger sm">Supprimer</button></form>`}</div></td></tr>`;
   }).join('');
   res.locals.render({ title: 'Super administrateur', body: `<section><div class="wrap">
-  <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn red" href="/super/compte/nouveau">+ Créer un compte</a><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
+  ${dashBanner({ tag: 'Supervision', title: 'Super administrateur', sub: 'Vous voyez tout : chaque boutique, ses stocks, ses ventes et ses mouvements.', actions: '<a class="btn red" href="/super/compte/nouveau">+ Ajouter un compte</a><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a>' })}
   ${storageIsPersistent() ? '' : '<div class="flash err" role="alert" style="margin:0 0 24px"><b>Stockage temporaire.</b> Le disque permanent n\'est pas encore branché : les boutiques, motos et photos seront effacées à la prochaine mise à jour du site. Ajoutez le disque Render (chemin /var/data).</div>'}
-  <div class="kpis">${kpi(c.pending, 'Comptes à valider')}${kpi(shops.length, 'Boutiques')}${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}</div>
+  <div class="kpis">${kpiX(c.pending, 'Comptes à valider')}${kpiX(shops.length, 'Boutiques')}${kpiX(c.orders, 'Commandes à traiter')}${kpiX(c.inquiries, 'Demandes à rappeler')}</div>
+  <div class="kpis">${kpiX(all.stock, 'Motos en stock')}${kpiMoney(all.stockValue, 'Valeur du stock', '')}${kpiX(all.sold, 'Motos vendues')}${kpiMoney(all.revenue, 'Ventes réalisées', 'gold')}</div>
   ${pending.length ? `<h3 class="sec">Comptes à valider <span class="pill new">${pending.length}</span></h3>
   <div class="tablewrap"><table><tr><th>Date</th><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th></th></tr>${pending.map((p) => `<tr class="rownew"><td>${esc(p.created_at.slice(0, 16))}</td><td><b>${esc(p.shop_name)}</b></td><td>${esc(p.email)}</td><td><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a></td>
   <td><div class="actions"><form method="post" action="/super/boutique/${p.id}/valider"><button class="btn sm">✓ Valider</button></form><form method="post" action="/super/boutique/${p.id}/refuser" data-confirm="Refuser et supprimer cette demande ?"><button class="btn danger sm">Refuser</button></form></div></td></tr>`).join('')}</table></div>` : ''}
@@ -579,6 +619,10 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
     <ol><li><span>Vous créez le compte d'une boutique (ci-dessous) : nom, e-mail et mot de passe du gérant.</span></li>
     <li><span>Le gérant se connecte sur <i>Espace boutique</i>, publie ses annonces (jusqu'à 5 photos) et suit les commandes de ses clients.</span></li>
     <li><span>Vous voyez tout ici : boutiques, annonces, commandes, demandes. Vous pouvez modifier, suspendre ou supprimer, et mettre une moto « À la une ».</span></li></ol></div>
+  <h3 class="sec">Suivi des boutiques <span class="hint">(stock, ventes et mouvements de chacune)</span></h3>
+  <div class="tablewrap"><table><tr><th>Boutique</th><th>En stock</th><th>Vendues</th><th>Ventes (FCFA)</th><th>Commandes</th><th>Dernier mouvement</th><th></th></tr>${perShop.map(({ u, st }) => `<tr><td><b>${esc(u.shop_name)}</b>${u.active ? '' : ' <span class="pill off">suspendue</span>'}</td><td>${st.stock} <small>(${fcfa(st.stockValue)})</small></td><td>${st.sold}</td><td><b>${fcfa(st.revenue)}</b><span class="bar"><i style="width:${Math.round((st.revenue / maxRev) * 100)}%"></i></span></td><td>${st.news ? `<span class="pill new">${st.news} nouv.</span> ` : ''}${st.orders}</td><td>${st.last ? esc(st.last.slice(0, 16)) : '—'}</td><td><a class="btn sm" href="/super/boutique/${u.id}/activite">Voir le détail</a></td></tr>`).join('') || '<tr><td colspan="7">Aucune boutique.</td></tr>'}</table></div>
+  <h3 class="sec">Derniers mouvements <span class="hint">(toutes boutiques)</span></h3>
+  ${actTable(db.prepare('SELECT a.*, u.shop_name FROM activity a JOIN users u ON u.id=a.shop_id ORDER BY a.id DESC LIMIT 25').all(), true)}
   ${searchBar('/super', q)}
   <h3 class="sec">Commandes <span class="hint">(toutes boutiques)</span></h3>${ordersTable(loadOrders(req.user, q), true)}
   <h3 class="sec">Demandes de rappel</h3>${inquiriesTable(loadInquiries(req.user, q), true)}
@@ -593,6 +637,25 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
 
   <h3 class="sec">Toutes les annonces <span class="hint">(valeur du catalogue : ${fcfa(total)})</span></h3>
   <div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Boutique</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motoRows(motos, { showShop: true }) || '<tr><td colspan="7">Aucune moto.</td></tr>'}</table></div>
+  </div></section>` });
+});
+
+const actTable = (rows, showShop) => rows.length ? `<div class="tablewrap"><table><tr><th>Date</th>${showShop ? '<th>Boutique</th>' : ''}<th>Mouvement</th><th>Détail</th><th>Montant</th></tr>${rows.map((r) => { const k = ACT[r.kind] || ['•', r.kind]; return `<tr><td>${esc(r.created_at.slice(0, 16))}</td>${showShop ? `<td>${esc(r.shop_name)}</td>` : ''}<td><span class="pill ${r.kind === 'vente' ? 'on' : r.kind === 'suppression' ? 'off' : 'new'}">${k[0]} ${k[1]}</span></td><td>${esc(r.label)}</td><td>${r.amount != null ? fcfa(r.amount) : ''}</td></tr>`; }).join('')}</table></div>` : '<div class="empty" style="margin-bottom:28px">Aucun mouvement pour le moment.</div>';
+app.get('/super/boutique/:id(\\d+)/activite', requireAuth, requireSuper, (req, res) => {
+  const u = db.prepare("SELECT * FROM users WHERE id=? AND status='approved'").get(req.params.id);
+  if (!u) { flash(res, 'err', 'Boutique introuvable.'); return res.redirect('/super'); }
+  const st = shopStats(u.id);
+  const motos = db.prepare('SELECT m.*, u.shop_name, u.active FROM motos m JOIN users u ON u.id=m.user_id WHERE m.user_id=? ORDER BY m.id DESC').all(u.id);
+  const orders = db.prepare('SELECT o.*, ? AS shop_name FROM orders o WHERE shop_id=? ORDER BY id DESC LIMIT 100').all(u.shop_name, u.id);
+  const acts = db.prepare('SELECT a.*, ? AS shop_name FROM activity a WHERE shop_id=? ORDER BY id DESC LIMIT 100').all(u.shop_name, u.id);
+  res.locals.render({ title: `Activité – ${u.shop_name}`, body: `<section><div class="wrap">
+  ${dashBanner({ tag: 'Détail de la boutique', title: esc(u.shop_name), sub: `${esc(u.email)} · ${esc(u.phone || '')} · ${u.active ? 'compte actif' : 'compte suspendu'}`, actions: '<a class="btn alt" href="/super">← Retour au tableau de bord</a>' })}
+  <div class="kpis">${kpiX(st.stock, 'Motos en stock')}${kpiMoney(st.stockValue, 'Valeur du stock')}${kpiX(st.sold, 'Motos vendues')}${kpiMoney(st.revenue, 'Ventes réalisées', 'gold')}</div>
+  <div class="kpis">${kpiX(st.news, 'Commandes nouvelles')}${kpiX(st.confirmed, 'Confirmées')}${kpiX(st.delivered, 'Livrées')}${kpiX(st.cancelled, 'Annulées')}</div>
+  <h3 class="sec">Mouvements de la boutique</h3>${actTable(acts, false)}
+  <h3 class="sec">Commandes</h3>${ordersTable(orders, false)}
+  <h3 class="sec">Annonces (${st.total})</h3>
+  ${motos.length ? `<div class="tablewrap"><table><tr><th></th><th>Moto</th><th>Type</th><th>Prix</th><th>Statut</th><th></th></tr>${motoRows(motos)}</table></div>` : '<div class="empty">Aucune annonce.</div>'}
   </div></section>` });
 });
 

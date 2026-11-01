@@ -589,3 +589,50 @@ nav.main > a.navcta { background: var(--red); color: #fff; border-radius: var(--
 nav.main > a.navcta::after { display: none; }
 nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: translateY(-1px); }
 @media (max-width: 860px) { nav.main > a.navcta { margin: 8px 0; justify-content: center; width: 100%; border-bottom: 0; } }
+
+/* ===== 19. Espaces d'administration : bannière animée, chiffres, barres ===== */
+.dashhero { position: relative; overflow: hidden; display: grid; grid-template-columns: 1.1fr 1fr; align-items: center; gap: 10px;
+  background: linear-gradient(120deg, #0f1a0f 0%, #17331a 55%, #1f4a1e 100%); color: #fff; border-radius: var(--r-l, 18px);
+  padding: 28px 30px 0; margin-bottom: 28px; box-shadow: var(--shadow-m); isolation: isolate; }
+.dashhero::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5;
+  background: radial-gradient(500px 220px at 85% 0%, rgba(225,29,39,.45), transparent 70%), radial-gradient(420px 260px at 0% 100%, rgba(70,177,38,.35), transparent 70%); animation: glow 7s ease-in-out infinite alternate; }
+@keyframes glow { to { transform: scale(1.12) translateX(-2%); opacity: .8; } }
+.dashhero-text { padding-bottom: 26px; }
+.dashhero .tag { display: inline-block; background: rgba(255,255,255,.14); color: #fff; padding: 5px 12px; border-radius: 99px; font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.dashhero h2 { color: #fff; margin: 12px 0 6px; font-size: clamp(1.7rem, 4.4vw, 2.6rem); }
+.dashhero h2::after { background: var(--red); }
+.dashhero p { color: rgba(255,255,255,.82); margin: 8px 0 0; max-width: 46ch; }
+.dashhero .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.dashhero .btn.alt { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.35); }
+.dashhero-road { position: relative; height: 170px; align-self: end; overflow: hidden; }
+.dashhero .lane { position: absolute; left: 0; right: 0; bottom: 0; height: 38px; background: #1b1d1b; border-top: 3px solid #333;
+  background-image: repeating-linear-gradient(90deg, transparent 0 34px, rgba(255,255,255,.75) 34px 64px); background-size: 98px 4px; background-repeat: repeat-x; background-position: 0 20px; animation: lane .7s linear infinite; }
+@keyframes lane { to { background-position: -98px 20px; } }
+.dashhero .rider { position: absolute; bottom: 22px; left: 0; width: 200px; color: #f4f7f2; animation: ridego 7s cubic-bezier(.45,.05,.55,.95) infinite alternate; }
+.dashhero .bk { width: 100%; display: block; overflow: visible; filter: drop-shadow(0 8px 10px rgba(0,0,0,.4)); animation: bump .45s ease-in-out infinite alternate; }
+@keyframes ridego { from { transform: translateX(-30px); } to { transform: translateX(calc(min(100vw, 520px) * .55)); } }
+@keyframes bump { to { transform: translateY(-3px); } }
+.dashhero .wh { transform-box: fill-box; transform-origin: center; animation: spin .5s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.dashhero .speed { position: absolute; height: 3px; border-radius: 3px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.7)); animation: speed 1.1s linear infinite; right: -40%; }
+.dashhero .s1 { top: 30%; width: 90px; } .dashhero .s2 { top: 48%; width: 140px; animation-delay: .35s; } .dashhero .s3 { top: 64%; width: 70px; animation-delay: .7s; }
+@keyframes speed { from { transform: translateX(0); } to { transform: translateX(-190vw); } }
+@media (max-width: 760px) { .dashhero { grid-template-columns: 1fr; padding: 22px 18px 0; } .dashhero-road { height: 130px; } .dashhero .rider { width: 150px; bottom: 20px; } .dashhero .lane { height: 30px; } }
+
+.kpis3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 760px) { .kpis3 { grid-template-columns: 1fr; } }
+.kpi.money strong { font-size: clamp(1.25rem, 3.2vw, 1.75rem); line-height: 1.15; word-break: break-word; }
+.kpi.gold { border-top-color: #f2a900; } .kpi.gold strong { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .kpi.gold strong { color: #ffc83d; } }
+.kpi.money { position: relative; overflow: hidden; }
+.kpi.money::after { content: ""; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 35%, rgba(255,255,255,.35) 50%, transparent 65%); transform: translateX(-120%); animation: shine 5s ease-in-out infinite; pointer-events: none; }
+@keyframes shine { 55%, 100% { transform: translateX(120%); } }
+.bar { display: block; height: 6px; border-radius: 6px; background: var(--line); margin-top: 6px; overflow: hidden; min-width: 80px; }
+.bar i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--green), var(--green-l)); transform-origin: left; animation: grow 1.1s var(--ease) both; }
+@keyframes grow { from { transform: scaleX(0); } }
+.sec { position: relative; padding-left: 14px; } .sec::before { content: ""; position: absolute; left: 0; top: .15em; bottom: .15em; width: 5px; border-radius: 4px; background: var(--red); }
+.tablewrap tr:not(:first-child) { transition: background .2s; } .tablewrap tr:not(:first-child):hover { background: color-mix(in srgb, var(--green) 7%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .dashhero::before, .dashhero .lane, .dashhero .rider, .dashhero .bk, .dashhero .wh, .dashhero .speed, .kpi.money::after, .bar i { animation: none !important; }
+}
+.dashhero-road { margin: 0 -30px; } @media (max-width: 760px) { .dashhero-road { margin: 0 -18px; } }

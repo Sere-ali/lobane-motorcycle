@@ -89,6 +89,15 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_orders_shop ON orders(shop_id, status, id);
+CREATE TABLE IF NOT EXISTS activity (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  amount INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_act_shop ON activity(shop_id, id);
 `);
 // Les photos « couverture » existantes (motos.image) entrent dans la galerie.
 function syncImages() {
