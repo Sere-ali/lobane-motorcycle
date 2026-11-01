@@ -467,10 +467,10 @@ function shopStats(shopId) {
     orders: o.total || 0, news: o.news || 0, confirmed: o.confirmed || 0, delivered: o.delivered || 0, cancelled: o.cancelled || 0, last };
 }
 // Bannière animée des espaces d'administration : une moto qui roule sur la route
-const MOTO_SVG = `<svg class="bk" viewBox="0 0 220 120" aria-hidden="true"><g class="bk-body"><path d="M60 78 L92 50 L128 50 L150 66 L172 66" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M92 50 L84 36 L104 36 L128 50" fill="currentColor" opacity=".92"/><path d="M150 66 L162 40 L176 40" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle cx="175" cy="62" r="5" fill="#ffd54a"/><path d="M96 56 L120 56 L112 78 L88 78Z" fill="currentColor" opacity=".7"/></g><g class="wh wh1"><circle cx="58" cy="90" r="22" fill="none" stroke="currentColor" stroke-width="7"/><path d="M58 70v40M38 90h40M44 76l28 28M72 76L44 104" stroke="currentColor" stroke-width="2.5"/></g><g class="wh wh2"><circle cx="172" cy="90" r="22" fill="none" stroke="currentColor" stroke-width="7"/><path d="M172 70v40M152 90h40M158 76l28 28M186 76l-28 28" stroke="currentColor" stroke-width="2.5"/></g></svg>`;
+const MOTO_IMG = '<img class="bk" src="/img/demo/winner-cutout.webp" width="886" height="774" alt="" decoding="async">';
 const dashBanner = ({ tag, title, sub = '', actions = '' }) => `<div class="dashhero reveal">
   <div class="dashhero-text"><span class="tag">${tag}</span><h2>${title}</h2>${sub ? `<p>${sub}</p>` : ''}<div class="actions">${actions}</div></div>
-  <div class="dashhero-road" aria-hidden="true"><span class="speed s1"></span><span class="speed s2"></span><span class="speed s3"></span><div class="rider">${MOTO_SVG}</div><div class="lane"></div></div></div>`;
+  <div class="dashhero-road" aria-hidden="true"><span class="speed s1"></span><span class="speed s2"></span><span class="speed s3"></span><div class="rider">${MOTO_IMG}</div><div class="lane"></div></div></div>`;
 const kpiX = (n, l, o = {}) => `<div class="kpi reveal${o.tone ? ' ' + o.tone : ''}"><strong data-count="${n}"${o.suffix ? ` data-suffix="${o.suffix}"` : ''}>${n}</strong><span>${l}</span></div>`;
 const kpiMoney = (n, l, tone = '') => `<div class="kpi money reveal ${tone}"><strong>${fcfa(n)}</strong><span>${l}</span></div>`;
 
