@@ -64,6 +64,7 @@ addCol('motos', 'etat', "TEXT NOT NULL DEFAULT 'neuf'");
 addCol('motos', 'negotiable', 'INTEGER NOT NULL DEFAULT 0');
 addCol('motos', 'featured', 'INTEGER NOT NULL DEFAULT 0');
 addCol('users', 'logo', 'TEXT');
+addCol('users', 'status', "TEXT NOT NULL DEFAULT 'approved'"); // approved | pending (en attente de validation par le super admin)
 addCol('inquiries', 'handled', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS moto_images (

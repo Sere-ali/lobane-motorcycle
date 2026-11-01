@@ -581,3 +581,11 @@ nav.main > a.navcta { background: var(--red); color: #fff; border-radius: var(--
 nav.main > a.navcta::after { display: none; }
 nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: translateY(-1px); }
 @media (max-width: 860px) { nav.main > a.navcta { margin: 8px 0; justify-content: center; width: 100%; border-bottom: 0; } }
+
+/* champ piège anti-robots (invisible pour les humains) */
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+/* bouton « Créer un compte » dans le menu */
+nav.main > a.navcta { background: var(--red); color: #fff; border-radius: var(--r-s); padding: 0 16px; min-height: 40px; }
+nav.main > a.navcta::after { display: none; }
+nav.main > a.navcta:hover { color: #fff; filter: brightness(1.08); transform: translateY(-1px); }
+@media (max-width: 860px) { nav.main > a.navcta { margin: 8px 0; justify-content: center; width: 100%; border-bottom: 0; } }

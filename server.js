@@ -94,12 +94,12 @@ app.use((req, res, next) => {
 // utilisateur courant + messages flash
 app.use((req, res, next) => {
   const tok = readToken(req.cookies.sid);
-  const u = tok ? db.prepare('SELECT * FROM users WHERE id=? AND active=1').get(tok.uid) : null;
+  const u = tok ? db.prepare('SELECT * FROM users WHERE id=? AND active=1 AND status=\'approved\'').get(tok.uid) : null;
   req.user = u && pwStamp(u.password_hash) === tok.stamp ? u : null;
   const f = req.cookies.flash;
   if (f) { try { res.locals.flash = JSON.parse(Buffer.from(f, 'base64').toString()); } catch {} res.clearCookie('flash'); }
   const nc = req.user ? newCounts(req.user) : null;
-  res.locals.badge = nc ? nc.orders + nc.inquiries : 0;
+  res.locals.badge = nc ? nc.orders + nc.inquiries + nc.pending : 0;
   res.locals.render = (opts) => res.set('Cache-Control', 'no-cache').send(layout({ user: req.user, flash: res.locals.flash, badge: res.locals.badge, ride: !/^\/(admin|super|connexion)/.test(req.path), ...opts }));
   next();
 });
@@ -159,7 +159,7 @@ const removeMotoFiles = (motoId) => photosOf(motoId).forEach((p) => rmFile(p.fil
 // ---- helpers de données ----
 const PER_PAGE = 12;
 const PUBLIC_MOTOS = `FROM motos m JOIN users u ON u.id=m.user_id WHERE u.active=1`;
-const shopsList = () => db.prepare(`SELECT id, shop_name FROM users WHERE active=1 AND (role='admin' OR EXISTS(SELECT 1 FROM motos WHERE user_id=users.id)) ORDER BY shop_name`).all();
+const shopsList = () => db.prepare(`SELECT id, shop_name FROM users WHERE active=1 AND status='approved' AND (role='admin' OR EXISTS(SELECT 1 FROM motos WHERE user_id=users.id)) ORDER BY shop_name`).all();
 
 const isOn = (v) => v === '1' || v === 'on' || v === 'true';
 function parseMoto(b) {
@@ -187,7 +187,7 @@ function parseMoto(b) {
 app.get('/', (req, res) => {
   const latest = db.prepare(`SELECT m.*, u.shop_name, u.phone, u.whatsapp, u.logo ${PUBLIC_MOTOS} AND m.status='disponible' ORDER BY m.featured DESC, m.id DESC LIMIT 9`).all();
   const nm = db.prepare(`SELECT COUNT(*) c ${PUBLIC_MOTOS}`).get().c;
-  const ns = db.prepare(`SELECT COUNT(*) c FROM users WHERE role='admin' AND active=1`).get().c;
+  const ns = db.prepare(`SELECT COUNT(*) c FROM users WHERE role='admin' AND active=1 AND status='approved'`).get().c;
   const counts = Object.fromEntries(db.prepare(`SELECT m.type t, COUNT(*) c ${PUBLIC_MOTOS} GROUP BY m.type`).all().map((r) => [r.t, r.c]));
   const ribbon = ['Vente de moto et pièces détachées', 'Super 2016 Power', 'Abidjan · Koumassi · 3 Ampoules', 'Motos de qualité à prix abordables'];
   const half = [...ribbon, ...ribbon].map((t) => `<span>${esc(t)}</span>`).join('');
@@ -350,6 +350,40 @@ app.post('/moto/:id(\\d+)/demande', (req, res) => {
   saveInquiry(req, res, m.user_id, m.id, `/moto/${m.id}`);
 });
 
+// ================= INSCRIPTION (ouverte à tous, validée par le super administrateur) =================
+app.get('/inscription', (req, res) => {
+  if (req.user) return res.redirect(homeOf(req.user));
+  res.locals.render({ title: 'Créer un compte – Lobane Motorcycle', body: `<section><div class="wrap narrow" style="max-width:640px"><h2 class="reveal">Créer un compte</h2>
+  <p class="sub reveal">Vous vendez des motos ? Créez le compte de votre boutique. <b>Le super administrateur doit le valider</b> avant que vous puissiez publier des annonces.</p>
+  <form class="stack panel reveal" method="post" action="/inscription">
+    <label>Nom de la boutique<input name="shop_name" required maxlength="80" placeholder="Ex. Moto Plus Abidjan" autocomplete="organization"></label>
+    <label>E-mail (pour vous connecter)<input type="email" name="email" required autocomplete="username"></label>
+    <div class="two"><label>Téléphone<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel"></label><label>WhatsApp <span class="hint">(les commandes arrivent ici)</span><input name="whatsapp" maxlength="30" inputmode="tel"></label></div>
+    <label>Mot de passe <span class="hint">(8 caractères minimum)</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+    <div class="hp" aria-hidden="true"><label>Ne pas remplir<input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <button class="btn red" type="submit">Envoyer ma demande</button>
+    <p class="hint">Déjà un compte ? <a href="/connexion"><b>Se connecter</b></a></p>
+  </form></div></section>` });
+});
+app.post('/inscription', (req, res) => {
+  if (req.user) return res.redirect(homeOf(req.user));
+  const b = req.body;
+  if (String(b.website || '') !== '') return res.redirect('/inscription'); // champ piège : un robot l'a rempli
+  if (limited(`signup:${req.ip}`, 3, 3600e3)) { flash(res, 'err', 'Trop de demandes. Réessayez plus tard.'); return res.redirect('/inscription'); }
+  const email = String(b.email || '').trim().toLowerCase(); const shop = String(b.shop_name || '').trim().slice(0, 80);
+  const phone = String(b.phone || '').trim().slice(0, 30); const pw = String(b.password || '');
+  if (!shop || !EMAIL_RE.test(email) || email.length > 120 || digits(phone).length < 8 || pw.length < 8 || pw.length > 200) {
+    flash(res, 'err', 'Vérifiez le nom, l\'e-mail, le téléphone et le mot de passe (8 caractères minimum).'); return res.redirect('/inscription');
+  }
+  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) { flash(res, 'err', 'Un compte existe déjà avec cet e-mail. Connectez-vous ou utilisez un autre e-mail.'); return res.redirect('/inscription'); }
+  if (db.prepare("SELECT COUNT(*) c FROM users WHERE status='pending'").get().c >= 100) { flash(res, 'err', 'Trop de demandes en attente pour le moment. Réessayez plus tard.'); return res.redirect('/inscription'); }
+  db.prepare("INSERT INTO users (email,password_hash,role,shop_name,phone,whatsapp,status) VALUES (?,?,'admin',?,?,?,'pending')")
+    .run(email, bcrypt.hashSync(pw, 10), shop, phone, String(b.whatsapp || phone).trim().slice(0, 30));
+  res.locals.render({ title: 'Demande envoyée – Lobane Motorcycle', body: `<section><div class="wrap narrow" style="max-width:640px;text-align:center"><div class="okmark" aria-hidden="true">✓</div><h2 style="display:inline-block">Demande envoyée</h2>
+  <p class="sub" style="margin-inline:auto">Merci ! Le compte de <b>${esc(shop)}</b> est en attente de validation par le super administrateur de Lobane Motorcycle. Dès qu'il est validé, connectez-vous avec <b>${esc(email)}</b> pour publier vos annonces.</p>
+  <div class="cta" style="justify-content:center;margin-top:14px"><a class="btn" href="/">Retour à l'accueil</a><a class="btn alt" href="/connexion">Se connecter</a></div></div></section>` });
+});
+
 // ================= AUTHENTIFICATION =================
 app.get('/connexion', (req, res) => {
   if (req.user) return res.redirect(req.user.role === 'super' ? '/super' : '/admin');
@@ -363,6 +397,7 @@ app.post('/connexion', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
   const ok = bcrypt.compareSync(String(req.body.password || ''), u ? u.password_hash : DUMMY_HASH) && !!u;
   if (!ok) { flash(res, 'err', 'E-mail ou mot de passe incorrect.'); return res.redirect('/connexion'); }
+  if (u.status === 'pending') { flash(res, 'err', 'Votre compte est en attente de validation par le super administrateur. Vous pourrez vous connecter dès qu\'il sera validé.'); return res.redirect('/connexion'); }
   if (!u.active) { flash(res, 'err', 'Ce compte est suspendu. Contactez Lobane Motorcycle.'); return res.redirect('/connexion'); }
   res.cookie('sid', makeToken(u), { httpOnly: true, sameSite: 'lax', secure: PROD, maxAge: 8 * 3600e3 });
   res.redirect(u.role === 'super' ? '/super' : '/admin');
@@ -383,6 +418,7 @@ function newCounts(user) {
   return {
     orders: db.prepare(`SELECT COUNT(*) c FROM orders WHERE status='nouvelle'${sh}`).get(...a).c,
     inquiries: db.prepare(`SELECT COUNT(*) c FROM inquiries WHERE handled=0${sh}`).get(...a).c,
+    pending: user.role === 'super' ? db.prepare("SELECT COUNT(*) c FROM users WHERE status='pending'").get().c : 0,
   };
 }
 function loadOrders(user, q) {
@@ -519,7 +555,8 @@ const EMAIL_RE = /^\S+@\S+\.\S+$/;
 app.get('/super', requireAuth, requireSuper, (req, res) => {
   const q = searchQ(req); const c = newCounts(req.user);
   const users = db.prepare(`SELECT u.*, (SELECT COUNT(*) FROM motos WHERE user_id=u.id) AS nb, (SELECT COUNT(*) FROM orders WHERE shop_id=u.id AND status='nouvelle') AS newo FROM users u ORDER BY u.id DESC`).all();
-  const shops = users.filter((u) => u.role === 'admin'); const admins = users.filter((u) => u.role === 'super');
+  const pending = users.filter((u) => u.status === 'pending');
+  const shops = users.filter((u) => u.role === 'admin' && u.status !== 'pending'); const admins = users.filter((u) => u.role === 'super');
   const motos = db.prepare('SELECT m.*, u.shop_name, u.active FROM motos m JOIN users u ON u.id=m.user_id ORDER BY m.id DESC LIMIT 300').all();
   const total = motos.reduce((s, m) => s + m.price, 0);
   const kpi = (n, l) => `<div class="kpi reveal"><strong data-count="${n}">${n}</strong><span>${l}</span></div>`;
@@ -534,7 +571,10 @@ app.get('/super', requireAuth, requireSuper, (req, res) => {
   res.locals.render({ title: 'Super administrateur', body: `<section><div class="wrap">
   <div class="dash-head"><h2>Super administrateur</h2><div class="actions"><a class="btn red" href="/super/compte/nouveau">+ Créer un compte</a><a class="btn" href="/admin/moto/nouvelle">+ Ajouter une moto</a><a class="btn alt" href="/super/sauvegarde">⬇ Sauvegarde</a><a class="btn alt" href="/admin/profil">Mon profil</a></div></div>
   ${storageIsPersistent() ? '' : '<div class="flash err" role="alert" style="margin:0 0 24px"><b>Stockage temporaire.</b> Le disque permanent n\'est pas encore branché : les boutiques, motos et photos seront effacées à la prochaine mise à jour du site. Ajoutez le disque Render (chemin /var/data).</div>'}
-  <div class="kpis">${kpi(shops.length, 'Boutiques')}${kpi(motos.length, 'Annonces au total')}${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}</div>
+  <div class="kpis">${kpi(c.pending, 'Comptes à valider')}${kpi(shops.length, 'Boutiques')}${kpi(c.orders, 'Commandes à traiter')}${kpi(c.inquiries, 'Demandes à rappeler')}</div>
+  ${pending.length ? `<h3 class="sec">Comptes à valider <span class="pill new">${pending.length}</span></h3>
+  <div class="tablewrap"><table><tr><th>Date</th><th>Boutique</th><th>E-mail</th><th>Téléphone</th><th></th></tr>${pending.map((p) => `<tr class="rownew"><td>${esc(p.created_at.slice(0, 16))}</td><td><b>${esc(p.shop_name)}</b></td><td>${esc(p.email)}</td><td><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a></td>
+  <td><div class="actions"><form method="post" action="/super/boutique/${p.id}/valider"><button class="btn sm">✓ Valider</button></form><form method="post" action="/super/boutique/${p.id}/refuser" data-confirm="Refuser et supprimer cette demande ?"><button class="btn danger sm">Refuser</button></form></div></td></tr>`).join('')}</table></div>` : ''}
   <div class="guide reveal"><b>Comment ça marche</b>
     <ol><li><span>Vous créez le compte d'une boutique (ci-dessous) : nom, e-mail et mot de passe du gérant.</span></li>
     <li><span>Le gérant se connecte sur <i>Espace boutique</i>, publie ses annonces (jusqu'à 5 photos) et suit les commandes de ses clients.</span></li>
@@ -590,6 +630,18 @@ const accountAction = (fn, msg, { guardLastSuper = false } = {}) => (req, res) =
   }
   fn(u, req); flash(res, 'ok', msg(u)); res.redirect('/super');
 };
+app.post('/super/boutique/:id(\\d+)/valider', requireAuth, requireSuper, (req, res) => {
+  const u = db.prepare("SELECT * FROM users WHERE id=? AND status='pending'").get(req.params.id);
+  if (!u) { flash(res, 'err', 'Demande introuvable ou déjà traitée.'); return res.redirect('/super'); }
+  db.prepare("UPDATE users SET status='approved' WHERE id=?").run(u.id);
+  flash(res, 'ok', `Compte « ${u.shop_name} » validé : le gérant peut maintenant se connecter et publier. Prévenez-le au ${u.phone}.`); res.redirect('/super');
+});
+app.post('/super/boutique/:id(\\d+)/refuser', requireAuth, requireSuper, (req, res) => {
+  const u = db.prepare("SELECT * FROM users WHERE id=? AND status='pending'").get(req.params.id);
+  if (!u) { flash(res, 'err', 'Demande introuvable ou déjà traitée.'); return res.redirect('/super'); }
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  flash(res, 'ok', `Demande « ${u.shop_name} » refusée et supprimée.`); res.redirect('/super');
+});
 app.post('/super/boutique/:id(\\d+)/suspendre', requireAuth, requireSuper, accountAction((u) => db.prepare('UPDATE users SET active=0 WHERE id=?').run(u.id), (u) => `${u.shop_name} est suspendu (ses annonces sont masquées).`, { guardLastSuper: true }));
 app.post('/super/boutique/:id(\\d+)/activer', requireAuth, requireSuper, accountAction((u) => db.prepare('UPDATE users SET active=1 WHERE id=?').run(u.id), (u) => `${u.shop_name} est réactivé.`));
 app.post('/super/boutique/:id(\\d+)/mdp', requireAuth, requireSuper, (req, res) => {
